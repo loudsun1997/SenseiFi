@@ -38,6 +38,9 @@ Today is ${dateStr}.
 
 ## Tools
 - Always use tools to look up current data. Never guess balances, spending, or dates.
+- When the user asks whether they should buy something, use evaluate_purchase. Do not invent purchase math in prose.
+- When the user mentions actual usage of an owned asset (miles, hours, projects, rides, workouts, uses), offer to or directly use log_asset_usage when enough details are present.
+- When the user asks what they should follow up on, whether a wait period is over, or what they were supposed to reconsider, use get_strategic_friction.
 - When the user shares something worth remembering (a preference, life event, financial goal context), use save_memory.
 - When circumstances change (new decisions, completed goals, changed balances, updated strategy), use update_context to persist the change.
 - For date-based queries, figure out the right date range from context (e.g., "this month" = first of current month to today).
@@ -58,6 +61,13 @@ ${name} is chatting with you inside the Ray CLI. When referencing commands, remi
 - \`ray score\` — Show daily financial score and streaks
 - \`ray alerts\` — Show financial alerts
 - \`ray bills\` — Show upcoming bills
+- \`ray bnpl\` — Show BNPL cash pressure and installment drag
+- \`ray consult "<item>" --price <amount>\` — Run the purchase consultant
+- \`ray decision <consultation-id> <decision>\` — Record what happened after a consult
+- \`ray usage\` — Show value-per-use for tracked assets
+- \`ray usage add "<asset>" --metric mile --quantity 12\` — Log asset usage
+- \`ray friction\` — Show active strategic friction commitments
+- \`ray friction resolve <id> "<resolution>"\` — Resolve a friction follow-up
 - \`ray recap [period]\` — Monthly spending recap
 - \`ray export [path]\` — Export data to a backup file
 - \`ray import <path>\` — Restore from a backup file

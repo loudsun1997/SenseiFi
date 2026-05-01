@@ -11,8 +11,25 @@ import { generateAlerts } from "../alerts/index.js";
 import { runDailySync } from "../daily-sync.js";
 import { startLinkServer } from "../server.js";
 import { addManualAccount, getManualAccounts, removeManualAccount, scrapeRedfinEstimate } from "../property.js";
-import { heading, progressBar, formatMoney, formatMoneyColored, padColumns, dim, formatDuration, formatError, renderLogo, institutionName } from "./format.js";
+import { heading, progressBar, formatMoney, formatMoneyColored, dim, formatDuration, formatError, renderLogo, institutionName } from "./format.js";
 import { getUpcomingBills } from "../db/bills.js";
+import {
+  createBnplPlan,
+  findPotentialBnplTransactions,
+  getBnplLedger,
+  getBnplPlans,
+  getBnplPressure,
+  markBnplInstallmentPaid,
+} from "../sensei/bnpl.js";
+import {
+  evaluatePurchase,
+  recordPurchaseDecision,
+  savePurchaseConsultation,
+  type PurchaseRecommendation,
+  type PurchaseUrgency,
+} from "../sensei/purchase-consultant.js";
+import { getFrictionCommitments, resolveFrictionCommitment } from "../sensei/strategic-friction.js";
+import { getAssetVpu, getRecentAssetVpu, logAssetUsage } from "../sensei/vpu.js";
 
 export async function runSync(): Promise<void> {
   const ora = (await import("ora")).default;
@@ -640,5 +657,333 @@ export function showRecap(period = "last_month"): void {
     }
   }
 
+  console.log();
+}
+
+export function runPurchaseConsult(itemName: string, options: {
+  price: string;
+  category?: string;
+  merchant?: string;
+  urgency?: string;
+  usesPerMonth?: string;
+  months?: string;
+  rentCost?: string;
+  bnpl?: boolean;
+  installments?: string;
+  installmentAmount?: string;
+  downPayment?: string;
+  every?: string;
+  save?: boolean;
+}): void {
+  const db = getDb();
+  const result = evaluatePurchase(db, {
+    itemName,
+    price: parseMoneyOption(options.price, "price"),
+    category: options.category,
+    merchant: options.merchant,
+    urgency: parsePurchaseUrgency(options.urgency),
+    paymentMode: options.bnpl ? "bnpl" : "cash",
+    expectedUsesPerMonth: options.usesPerMonth ? parseNumberOption(options.usesPerMonth, "uses-per-month") : undefined,
+    expectedMonths: options.months ? parseNumberOption(options.months, "months") : undefined,
+    rentCost: options.rentCost ? parseMoneyOption(options.rentCost, "rent-cost") : undefined,
+    installmentCount: options.installments ? Math.round(parseNumberOption(options.installments, "installments")) : undefined,
+    installmentAmount: options.installmentAmount ? parseMoneyOption(options.installmentAmount, "installment-amount") : undefined,
+    downPayment: options.downPayment ? parseMoneyOption(options.downPayment, "down-payment") : undefined,
+    installmentEveryDays: options.every ? Math.round(parseNumberOption(options.every, "every")) : undefined,
+  });
+
+  const consultationId = options.save === false ? null : savePurchaseConsultation(db, result);
+  const recColor = recommendationColor(result.recommendation);
+
+  console.log(`\n${heading("Purchase Consultant")} ${consultationId ? dim(`#${consultationId}`) : ""}\n`);
+  console.log(`  ${chalk.bold(result.input.itemName)}  ${rawFormatMoney(result.input.price)}  ${dim(result.input.category || "uncategorized")}`);
+  console.log(`  Recommendation: ${recColor(result.recommendation.toUpperCase())}  ${dim(`utility ${result.utilityScore}/100, confidence ${result.confidence}`)}`);
+
+  console.log(`\n${heading("Liquidity Audit")}`);
+  console.log(`  Cash on hand:        ${rawFormatMoney(result.liquidity.cashOnHand)}`);
+  console.log(`  Purchase cash hit:   ${rawFormatMoney(result.liquidity.purchaseCashImpact)}`);
+  console.log(`  Cash after purchase: ${rawFormatMoney(result.liquidity.cashAfterPurchase)}`);
+  if (result.liquidity.emergencyBufferMonthsAfterPurchase !== null) {
+    console.log(`  Buffer after buy:    ${result.liquidity.emergencyBufferMonthsAfterPurchase.toFixed(1)} months`);
+  }
+
+  console.log(`\n${heading("Cash Pressure")}`);
+  console.log(`  30 days: ${rawFormatMoney(result.pressure.combined30)}  ${dim(`current ${rawFormatMoney(result.pressure.currentBnpl30)} + purchase ${rawFormatMoney(result.pressure.candidate30)}`)}`);
+  console.log(`  60 days: ${rawFormatMoney(result.pressure.combined60)}  ${dim(`current ${rawFormatMoney(result.pressure.currentBnpl60)} + purchase ${rawFormatMoney(result.pressure.candidate60)}`)}`);
+  console.log(`  90 days: ${rawFormatMoney(result.pressure.combined90)}  ${dim(`current ${rawFormatMoney(result.pressure.currentBnpl90)} + purchase ${rawFormatMoney(result.pressure.candidate90)}`)}`);
+
+  console.log(`\n${heading("Value Forecast")}`);
+  const vpu = result.value.valuePerUse === null ? "unknown" : `${rawFormatMoney(result.value.valuePerUse)} per ${result.value.metric}`;
+  console.log(`  Expected usage:      ${result.value.expectedUses} ${result.value.metric}${result.value.expectedUses === 1 ? "" : "s"}`);
+  console.log(`  Value per use:       ${vpu}`);
+  console.log(`  Usage source:        ${result.value.usageSource}`);
+  if (result.value.rentalBreakEvenUses !== null) {
+    console.log(`  Rental break-even:   ${result.value.rentalBreakEvenUses} ${result.value.metric}${result.value.rentalBreakEvenUses === 1 ? "" : "s"}`);
+  }
+  console.log(`  Savings delay:       ${result.savingsDelayDays === null ? "unbounded" : `${result.savingsDelayDays} day${result.savingsDelayDays === 1 ? "" : "s"}`}`);
+
+  console.log(`\n${heading("Score Breakdown")}`);
+  console.log(`  Liquidity:      ${result.scores.liquidity}/100`);
+  console.log(`  Cash pressure:  ${result.scores.cashPressure}/100`);
+  console.log(`  Value:          ${result.scores.value}/100`);
+  console.log(`  Impulse guard:  ${result.scores.impulse}/100`);
+
+  console.log(`\n${heading("Why")}`);
+  for (const line of result.rationale) console.log(`  • ${line}`);
+
+  console.log(`\n${heading("Impulse Guard")}`);
+  for (const line of result.impulseGuard) console.log(`  • ${line}`);
+  console.log();
+}
+
+export function recordConsultDecision(consultationId: number, decision: string, note?: string): void {
+  const db = getDb();
+  recordPurchaseDecision(db, consultationId, decision, note);
+  console.log(`\n  ${chalk.green("+")} Recorded decision for consultation ${consultationId}: ${decision}\n`);
+}
+
+export function addAssetUsage(assetName: string, options: {
+  category?: string;
+  price?: string;
+  metric?: string;
+  quantity?: string;
+  date?: string;
+  note?: string;
+}): void {
+  const db = getDb();
+  const id = logAssetUsage(db, {
+    assetName,
+    category: options.category,
+    purchasePrice: options.price ? parseMoneyOption(options.price, "price") : undefined,
+    usageMetric: options.metric,
+    quantity: options.quantity ? parseNumberOption(options.quantity, "quantity") : undefined,
+    usedAt: options.date,
+    note: options.note,
+  });
+  const summary = getAssetVpu(db, assetName);
+  console.log(`\n${heading("Usage Logged")} ${dim(`#${id}`)}\n`);
+  if (summary) {
+    console.log(`  ${chalk.bold(summary.assetName)}  ${summary.totalQuantity} ${summary.usageMetric}${summary.totalQuantity === 1 ? "" : "s"}`);
+    if (summary.costPerUnit !== null) console.log(`  Cost per ${summary.usageMetric}: ${rawFormatMoney(summary.costPerUnit)}`);
+  }
+  console.log();
+}
+
+export function showAssetVpu(assetName?: string, limit = 10): void {
+  const db = getDb();
+  const summaries = assetName ? [getAssetVpu(db, assetName)].filter(Boolean) as NonNullable<ReturnType<typeof getAssetVpu>>[] : getRecentAssetVpu(db, limit);
+
+  console.log(`\n${heading("Value Per Use")}\n`);
+  if (summaries.length === 0) {
+    console.log("  No usage logged yet.");
+    console.log(dim("  Add usage with: ray usage add \"Bike\" --category cycling --metric mile --quantity 12 --price 1200"));
+    console.log();
+    return;
+  }
+
+  for (const s of summaries) {
+    const cost = s.costPerUnit === null ? "unknown" : rawFormatMoney(s.costPerUnit);
+    console.log(`  ${chalk.bold(s.assetName)}  ${dim(s.category || "uncategorized")}`);
+    console.log(`    ${s.totalQuantity} ${s.usageMetric}${s.totalQuantity === 1 ? "" : "s"} across ${s.useCount} log${s.useCount === 1 ? "" : "s"}  ${dim(`${s.firstUsedAt} to ${s.lastUsedAt}`)}`);
+    console.log(`    Cost per ${s.usageMetric}: ${cost}`);
+  }
+  console.log();
+}
+
+export function showStrategicFriction(options: { status?: string; dueWithin?: string } = {}): void {
+  const db = getDb();
+  const status = parseFrictionStatus(options.status);
+  const commitments = getFrictionCommitments(db, {
+    status,
+    dueWithinDays: options.dueWithin ? parseNumberOption(options.dueWithin, "due-within") : undefined,
+  });
+
+  console.log(`\n${heading("Strategic Friction")} ${dim(status === "all" ? "all" : status)}\n`);
+  if (commitments.length === 0) {
+    console.log("  No matching friction commitments.");
+    console.log();
+    return;
+  }
+
+  for (const c of commitments) {
+    console.log(`  ${dim(String(c.id).padStart(3))}  ${c.type}  ${dim(c.dueAt)}`);
+    console.log(`       ${chalk.bold(c.itemName)} ${rawFormatMoney(c.price)}  ${dim(`consult #${c.consultationId}, ${c.recommendation}`)}`);
+    console.log(`       ${c.prompt}`);
+  }
+  console.log();
+}
+
+export function resolveStrategicFriction(commitmentId: number, resolution: string, status = "resolved"): void {
+  const db = getDb();
+  resolveFrictionCommitment(db, commitmentId, resolution, parseFrictionResolutionStatus(status));
+  console.log(`\n  ${chalk.green("+")} Strategic friction ${commitmentId} marked ${status}.\n`);
+}
+
+function parseMoneyOption(value: string, name: string): number {
+  const parsed = Number(value.replace(/[$,]/g, ""));
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`--${name} must be a positive number.`);
+  }
+  return parsed;
+}
+
+function parseNumberOption(value: string, name: string): number {
+  const parsed = Number(value.replace(/,/g, ""));
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`--${name} must be a non-negative number.`);
+  }
+  return parsed;
+}
+
+function parsePurchaseUrgency(value?: string): PurchaseUrgency {
+  if (!value) return "normal";
+  if (value === "low" || value === "normal" || value === "high") return value;
+  throw new Error("--urgency must be one of: low, normal, high.");
+}
+
+function recommendationColor(recommendation: PurchaseRecommendation): (text: string) => string {
+  switch (recommendation) {
+    case "buy": return chalk.green;
+    case "wait": return chalk.yellow;
+    case "rent": return chalk.cyan;
+    case "skip": return chalk.red;
+  }
+}
+
+function parseFrictionStatus(value?: string): "active" | "resolved" | "expired" | "dismissed" | "all" {
+  if (!value) return "active";
+  if (value === "active" || value === "resolved" || value === "expired" || value === "dismissed" || value === "all") return value;
+  throw new Error("--status must be one of: active, resolved, expired, dismissed, all.");
+}
+
+function parseFrictionResolutionStatus(value?: string): "resolved" | "expired" | "dismissed" {
+  if (!value) return "resolved";
+  if (value === "resolved" || value === "expired" || value === "dismissed") return value;
+  throw new Error("--status must be one of: resolved, expired, dismissed.");
+}
+
+export function showBnplPressure(days = 90): void {
+  const db = getDb();
+  const pressure = getBnplPressure(db, { days });
+
+  console.log(`\n${heading("BNPL Cash Pressure")} ${dim(`as of ${pressure.asOf}`)}\n`);
+
+  if (pressure.activePlanCount === 0) {
+    console.log("  No active BNPL plans tracked yet.");
+    console.log(dim("  Add one with: ray bnpl add \"Item\" --total 400 --installments 4 --next YYYY-MM-DD"));
+    console.log();
+    return;
+  }
+
+  console.log(`  Active plans:      ${chalk.bold(String(pressure.activePlanCount))}`);
+  console.log(`  Remaining BNPL:    ${chalk.bold(rawFormatMoney(pressure.remainingBnpl))}`);
+  for (const window of pressure.windows) {
+    console.log(`  Next ${String(window.days).padStart(2)} days:     ${rawFormatMoney(window.amount)}`);
+  }
+
+  console.log(`\n${heading("Monthly Obligation Load")}`);
+  for (const month of pressure.monthly) {
+    console.log(
+      `  ${month.month}  BNPL ${rawFormatMoney(month.bnplAmount).padStart(10)}  ` +
+      `${dim(`fixed ${rawFormatMoney(month.fixedObligationLoad)} | total ${rawFormatMoney(month.totalObligationLoad)}`)}`
+    );
+  }
+
+  if (pressure.nextInstallments.length > 0) {
+    console.log(`\n${heading("Next Installments")}`);
+    for (const item of pressure.nextInstallments) {
+      const label = item.provider || item.merchant || item.itemName;
+      console.log(`  ${dim(item.dueDate)}  ${rawFormatMoney(item.amount).padStart(10)}  ${label}  ${dim(item.itemName)}`);
+    }
+  }
+
+  if (pressure.collisions.length > 0) {
+    console.log(`\n${heading("Payment Collisions")}`);
+    for (const collision of pressure.collisions) {
+      console.log(
+        `  ${dim(collision.date)}  BNPL ${rawFormatMoney(collision.bnplAmount)} + ` +
+        `${rawFormatMoney(collision.otherAmount)} bills  ${dim(collision.names.join(", "))}`
+      );
+    }
+  }
+
+  console.log();
+}
+
+export function addBnplPlan(itemName: string, options: {
+  total: string;
+  installments: string;
+  next: string;
+  provider?: string;
+  merchant?: string;
+  remaining?: string;
+  amount?: string;
+  every?: string;
+  purchaseDate?: string;
+  note?: string;
+}): void {
+  const db = getDb();
+  const planId = createBnplPlan(db, {
+    itemName,
+    provider: options.provider,
+    merchant: options.merchant,
+    totalAmount: parseMoneyOption(options.total, "total"),
+    remainingAmount: options.remaining ? parseMoneyOption(options.remaining, "remaining") : undefined,
+    installmentAmount: options.amount ? parseMoneyOption(options.amount, "amount") : undefined,
+    installmentCount: Math.round(parseNumberOption(options.installments, "installments")),
+    nextPaymentDate: options.next,
+    frequencyDays: options.every ? Math.round(parseNumberOption(options.every, "every")) : undefined,
+    purchaseDate: options.purchaseDate,
+    note: options.note,
+  });
+
+  const [plan] = getBnplPlans(db, "active").filter((p) => p.id === planId);
+  console.log(`\n${heading("BNPL Plan Added")} ${dim(`#${planId}`)}\n`);
+  console.log(`  ${chalk.bold(plan.itemName)}  ${rawFormatMoney(plan.remainingAmount)} remaining`);
+  console.log(`  ${plan.installmentCount} installments × about ${rawFormatMoney(plan.installmentAmount)}  ${dim(`every ${plan.frequencyDays} days`)}`);
+  console.log(`  Next payment: ${plan.nextPaymentDate}`);
+  console.log();
+}
+
+export function showBnplLedger(days = 90): void {
+  const db = getDb();
+  const ledger = getBnplLedger(db, { days });
+
+  console.log(`\n${heading("BNPL Ledger")} ${dim(`next ${days} days`)}\n`);
+  if (ledger.length === 0) {
+    console.log("  No scheduled BNPL installments in this window.\n");
+    return;
+  }
+
+  for (const item of ledger) {
+    const label = item.provider || item.merchant || item.itemName;
+    console.log(
+      `  ${dim(String(item.id).padStart(3))}  ${dim(item.dueDate)}  ` +
+      `${rawFormatMoney(item.amount).padStart(10)}  ${label}  ` +
+      `${dim(`#${item.installmentNumber} ${item.itemName}`)}`
+    );
+  }
+  console.log();
+}
+
+export function markBnplPaid(installmentId: number, options: { date?: string; transaction?: string } = {}): void {
+  const db = getDb();
+  markBnplInstallmentPaid(db, installmentId, options.date, options.transaction);
+  console.log(`\n  ${chalk.green("+")} Marked BNPL installment ${installmentId} paid.\n`);
+}
+
+export function scanBnplCandidates(days = 180): void {
+  const db = getDb();
+  const candidates = findPotentialBnplTransactions(db, days);
+
+  console.log(`\n${heading("Possible BNPL Transactions")} ${dim(`last ${days} days`)}\n`);
+  if (candidates.length === 0) {
+    console.log("  No obvious Affirm/Klarna/Afterpay-style transactions found.\n");
+    return;
+  }
+
+  for (const t of candidates) {
+    console.log(`  ${dim(t.date)}  ${rawFormatMoney(t.amount).padStart(10)}  ${t.merchant || t.name}  ${dim(t.transactionId)}`);
+  }
   console.log();
 }

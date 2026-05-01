@@ -13,6 +13,10 @@ import { generateAlerts } from "../alerts/index.js";
 import { saveMemory, getMemories } from "./memory.js";
 import { readContext, writeContext, replaceContextSection } from "./context.js";
 import { simulatePayoff } from "../db/helpers.js";
+import { createBnplPlan, getBnplLedger, getBnplPressure } from "../sensei/bnpl.js";
+import { evaluatePurchase, recordPurchaseDecision, savePurchaseConsultation } from "../sensei/purchase-consultant.js";
+import { getFrictionCommitments, resolveFrictionCommitment } from "../sensei/strategic-friction.js";
+import { getAssetVpu, getRecentAssetVpu, logAssetUsage } from "../sensei/vpu.js";
 
 export const toolDefinitions: ToolDefinition[] = [
   // --- Existing tools ---
@@ -246,6 +250,139 @@ export const toolDefinitions: ToolDefinition[] = [
         extra_monthly: { type: "number", description: "Extra monthly payment beyond minimums (default 0)" },
       },
       required: [],
+    },
+  },
+  {
+    name: "get_bnpl_pressure",
+    description: "Get BNPL cash pressure from tracked installment plans, including 30/60/90 day drag, monthly obligation load, upcoming installments, and payment collisions.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        days: { type: "number", description: "Number of days ahead to inspect (default 90)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_bnpl_ledger",
+    description: "Get the chronological BNPL installment ledger for tracked active plans.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        days: { type: "number", description: "Number of days ahead to inspect (default 90)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "add_bnpl_plan",
+    description: "Add a BNPL installment plan to the pressure ledger when the user provides plan details.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        item_name: { type: "string", description: "Item or purchase name" },
+        total_amount: { type: "number", description: "Total purchase amount" },
+        installment_count: { type: "number", description: "Number of remaining installments" },
+        next_payment_date: { type: "string", description: "Next payment date (YYYY-MM-DD)" },
+        provider: { type: "string", description: "BNPL provider, e.g. Affirm, Klarna, Afterpay" },
+        merchant: { type: "string", description: "Merchant name" },
+        remaining_amount: { type: "number", description: "Remaining amount if different from total amount" },
+        installment_amount: { type: "number", description: "Installment amount if fixed" },
+        frequency_days: { type: "number", description: "Days between installments (default 14)" },
+        note: { type: "string", description: "Optional note" },
+      },
+      required: ["item_name", "total_amount", "installment_count", "next_payment_date"],
+    },
+  },
+  {
+    name: "evaluate_purchase",
+    description: "Run the Sensei-Fi purchase consultant. Use this whenever the user asks whether they should buy something, whether a purchase is worth it, or wants a buy/wait/rent/skip recommendation.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        item_name: { type: "string", description: "Item or purchase name" },
+        price: { type: "number", description: "Purchase price" },
+        category: { type: "string", description: "Purchase category, e.g. cycling, software, tool, electronics" },
+        merchant: { type: "string", description: "Merchant name" },
+        payment_mode: { type: "string", description: "cash or bnpl", default: "cash" },
+        urgency: { type: "string", description: "low, normal, or high", default: "normal" },
+        expected_uses_per_month: { type: "number", description: "Expected uses per month" },
+        expected_months: { type: "number", description: "Expected months of use" },
+        rent_cost: { type: "number", description: "Rental/borrow/test cost for comparison" },
+        installment_count: { type: "number", description: "BNPL installment count if evaluating BNPL" },
+        installment_amount: { type: "number", description: "BNPL installment amount if fixed" },
+        down_payment: { type: "number", description: "BNPL down payment" },
+        installment_every_days: { type: "number", description: "Days between BNPL installments" },
+        save: { type: "boolean", description: "Whether to save the consultation, default true" },
+      },
+      required: ["item_name", "price"],
+    },
+  },
+  {
+    name: "record_purchase_decision",
+    description: "Record the user's final decision after a saved purchase consultation.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        consultation_id: { type: "number", description: "Saved purchase consultation ID" },
+        decision: { type: "string", description: "buy, wait, rent, skip, or custom decision" },
+        note: { type: "string", description: "Optional note" },
+      },
+      required: ["consultation_id", "decision"],
+    },
+  },
+  {
+    name: "log_asset_usage",
+    description: "Log real-world usage for an owned asset so Sensei-Fi can calculate value-per-use, such as cost-per-mile, cost-per-project, cost-per-hour, or cost-per-use.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        asset_name: { type: "string", description: "Asset name" },
+        category: { type: "string", description: "Asset category, e.g. cycling, tool, software" },
+        purchase_price: { type: "number", description: "Purchase price/cost basis if known" },
+        usage_metric: { type: "string", description: "Usage metric, e.g. mile, project, hour, use" },
+        quantity: { type: "number", description: "Usage quantity" },
+        used_at: { type: "string", description: "Usage date (YYYY-MM-DD)" },
+        note: { type: "string", description: "Optional note" },
+      },
+      required: ["asset_name"],
+    },
+  },
+  {
+    name: "get_asset_vpu",
+    description: "Get value-per-use for one asset or recent assets.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        asset_name: { type: "string", description: "Asset name. If omitted, returns recent assets." },
+        limit: { type: "number", description: "Number of recent assets when asset_name is omitted" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_strategic_friction",
+    description: "Get active strategic friction commitments such as 48-hour cooldowns, rent-first checks, usage audits, and BNPL cash-price checks.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        status: { type: "string", description: "active, resolved, expired, dismissed, or all", default: "active" },
+        due_within_days: { type: "number", description: "Only return commitments due within N days" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "resolve_strategic_friction",
+    description: "Resolve a strategic friction commitment after the user reports what happened.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        commitment_id: { type: "number", description: "Strategic friction commitment ID" },
+        resolution: { type: "string", description: "What happened" },
+        status: { type: "string", description: "resolved, expired, or dismissed", default: "resolved" },
+      },
+      required: ["commitment_id", "resolution"],
     },
   },
 
@@ -657,6 +794,139 @@ export async function executeTool(db: Database.Database, toolName: string, toolI
         result += ` | Debt-free by: ${finalDate.toISOString().slice(0, 7)}`;
       }
       return result;
+    }
+
+    case "get_bnpl_pressure": {
+      const pressure = getBnplPressure(db, { days: toolInput.days || 90 });
+      if (pressure.activePlanCount === 0) return "No active BNPL plans tracked yet.";
+      let result = `BNPL pressure: ${pressure.activePlanCount} active plan${pressure.activePlanCount === 1 ? "" : "s"}, ${formatMoney(pressure.remainingBnpl)} remaining`;
+      result += `\nWindows: ${pressure.windows.map(w => `${w.days}d ${formatMoney(w.amount)}`).join(" | ")}`;
+      result += `\n\nMonthly load:`;
+      for (const month of pressure.monthly) {
+        result += `\n${month.month}: BNPL ${formatMoney(month.bnplAmount)} | fixed obligations ${formatMoney(month.fixedObligationLoad)} | total ${formatMoney(month.totalObligationLoad)}`;
+      }
+      if (pressure.nextInstallments.length > 0) {
+        result += `\n\nNext installments:`;
+        for (const item of pressure.nextInstallments) {
+          const label = item.provider || item.merchant || item.itemName;
+          result += `\n${item.dueDate}: ${formatMoney(item.amount)} — ${label} (${item.itemName})`;
+        }
+      }
+      if (pressure.collisions.length > 0) {
+        result += `\n\nPayment collisions:`;
+        for (const collision of pressure.collisions) {
+          result += `\n${collision.date}: BNPL ${formatMoney(collision.bnplAmount)} plus ${formatMoney(collision.otherAmount)} other bills (${collision.names.join(", ")})`;
+        }
+      }
+      return result;
+    }
+
+    case "get_bnpl_ledger": {
+      const ledger = getBnplLedger(db, { days: toolInput.days || 90 });
+      if (ledger.length === 0) return "No scheduled BNPL installments in that window.";
+      return ledger.map(item => {
+        const label = item.provider || item.merchant || item.itemName;
+        return `${item.dueDate} | ${formatMoney(item.amount)} | ${label} | #${item.installmentNumber} ${item.itemName}`;
+      }).join("\n");
+    }
+
+    case "add_bnpl_plan": {
+      const planId = createBnplPlan(db, {
+        itemName: toolInput.item_name,
+        provider: toolInput.provider,
+        merchant: toolInput.merchant,
+        totalAmount: toolInput.total_amount,
+        remainingAmount: toolInput.remaining_amount,
+        installmentAmount: toolInput.installment_amount,
+        installmentCount: Math.round(toolInput.installment_count),
+        nextPaymentDate: toolInput.next_payment_date,
+        frequencyDays: toolInput.frequency_days,
+        note: toolInput.note,
+      });
+      return `BNPL plan added to the pressure ledger as #${planId}.`;
+    }
+
+    case "evaluate_purchase": {
+      const result = evaluatePurchase(db, {
+        itemName: toolInput.item_name,
+        price: toolInput.price,
+        category: toolInput.category,
+        merchant: toolInput.merchant,
+        paymentMode: toolInput.payment_mode === "bnpl" ? "bnpl" : "cash",
+        urgency: ["low", "normal", "high"].includes(toolInput.urgency) ? toolInput.urgency : "normal",
+        expectedUsesPerMonth: toolInput.expected_uses_per_month,
+        expectedMonths: toolInput.expected_months,
+        rentCost: toolInput.rent_cost,
+        installmentCount: toolInput.installment_count,
+        installmentAmount: toolInput.installment_amount,
+        downPayment: toolInput.down_payment,
+        installmentEveryDays: toolInput.installment_every_days,
+      });
+      const id = toolInput.save === false ? null : savePurchaseConsultation(db, result);
+      let text = `Purchase consult${id ? ` #${id}` : ""}: ${result.recommendation.toUpperCase()} (${result.utilityScore}/100 utility, ${result.confidence} confidence)`;
+      text += `\nItem: ${result.input.itemName} | Price: ${formatMoney(result.input.price)} | Category: ${result.input.category || "uncategorized"}`;
+      text += `\nLiquidity: cash ${formatMoney(result.liquidity.cashOnHand)}, cash after purchase ${formatMoney(result.liquidity.cashAfterPurchase)}`;
+      if (result.liquidity.emergencyBufferMonthsAfterPurchase !== null) {
+        text += `, buffer ${result.liquidity.emergencyBufferMonthsAfterPurchase.toFixed(1)} months`;
+      }
+      text += `\nBNPL/installment pressure: 30d ${formatMoney(result.pressure.combined30)} | 60d ${formatMoney(result.pressure.combined60)} | 90d ${formatMoney(result.pressure.combined90)}`;
+      text += `\nValue: ${result.value.valuePerUse === null ? "unknown" : `${formatMoney(result.value.valuePerUse)} per ${result.value.metric}`} over ${result.value.expectedUses} expected ${result.value.metric}${result.value.expectedUses === 1 ? "" : "s"}`;
+      text += `\nSavings delay: ${result.savingsDelayDays === null ? "unbounded" : `${result.savingsDelayDays} days`}`;
+      text += `\nScores: liquidity ${result.scores.liquidity}, cash pressure ${result.scores.cashPressure}, value ${result.scores.value}, impulse ${result.scores.impulse}`;
+      text += `\nRationale:\n${result.rationale.map(line => `- ${line}`).join("\n")}`;
+      text += `\nImpulse guard:\n${result.impulseGuard.map(line => `- ${line}`).join("\n")}`;
+      return text;
+    }
+
+    case "record_purchase_decision": {
+      recordPurchaseDecision(db, toolInput.consultation_id, toolInput.decision, toolInput.note);
+      return `Recorded purchase decision for consultation #${toolInput.consultation_id}: ${toolInput.decision}`;
+    }
+
+    case "log_asset_usage": {
+      const id = logAssetUsage(db, {
+        assetName: toolInput.asset_name,
+        category: toolInput.category,
+        purchasePrice: toolInput.purchase_price,
+        usageMetric: toolInput.usage_metric,
+        quantity: toolInput.quantity,
+        usedAt: toolInput.used_at,
+        note: toolInput.note,
+      });
+      const summary = getAssetVpu(db, toolInput.asset_name);
+      if (!summary) return `Usage logged as #${id}.`;
+      return `Usage logged as #${id}. ${summary.assetName}: ${summary.totalQuantity} ${summary.usageMetric}${summary.totalQuantity === 1 ? "" : "s"} total${summary.costPerUnit !== null ? `, ${formatMoney(summary.costPerUnit)} per ${summary.usageMetric}` : ""}.`;
+    }
+
+    case "get_asset_vpu": {
+      const summaries = toolInput.asset_name
+        ? [getAssetVpu(db, toolInput.asset_name)].filter(Boolean) as NonNullable<ReturnType<typeof getAssetVpu>>[]
+        : getRecentAssetVpu(db, toolInput.limit || 10);
+      if (summaries.length === 0) return "No asset usage logged yet.";
+      return summaries.map(s => {
+        const cost = s.costPerUnit === null ? "unknown" : `${formatMoney(s.costPerUnit)} per ${s.usageMetric}`;
+        return `${s.assetName}: ${s.totalQuantity} ${s.usageMetric}${s.totalQuantity === 1 ? "" : "s"} across ${s.useCount} log${s.useCount === 1 ? "" : "s"} | cost: ${cost}`;
+      }).join("\n");
+    }
+
+    case "get_strategic_friction": {
+      const rawStatus = toolInput.status || "active";
+      const status = ["active", "resolved", "expired", "dismissed", "all"].includes(rawStatus) ? rawStatus : "active";
+      const commitments = getFrictionCommitments(db, {
+        status,
+        dueWithinDays: toolInput.due_within_days,
+      });
+      if (commitments.length === 0) return "No matching strategic friction commitments.";
+      return commitments.map(c =>
+        `#${c.id} ${c.type} (${c.status}) due ${c.dueAt}\n${c.itemName} ${formatMoney(c.price)} — consult #${c.consultationId}, ${c.recommendation}\n${c.prompt}`
+      ).join("\n\n");
+    }
+
+    case "resolve_strategic_friction": {
+      const rawStatus = toolInput.status || "resolved";
+      const status = ["resolved", "expired", "dismissed"].includes(rawStatus) ? rawStatus : "resolved";
+      resolveFrictionCommitment(db, toolInput.commitment_id, toolInput.resolution, status);
+      return `Strategic friction commitment #${toolInput.commitment_id} marked ${status}.`;
     }
 
     // --- New: Context ---

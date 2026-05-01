@@ -215,6 +215,110 @@ export function migrate(db: Database.Database): void {
       tokens_used INTEGER,
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS bnpl_plans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT,
+      merchant TEXT,
+      item_name TEXT NOT NULL,
+      total_amount REAL NOT NULL,
+      remaining_amount REAL NOT NULL,
+      installment_amount REAL NOT NULL,
+      installment_count INTEGER NOT NULL,
+      next_payment_date TEXT,
+      frequency_days INTEGER NOT NULL DEFAULT 14,
+      status TEXT NOT NULL DEFAULT 'active',
+      purchase_date TEXT,
+      purchase_transaction_id TEXT,
+      note TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS bnpl_installments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      plan_id INTEGER NOT NULL REFERENCES bnpl_plans(id) ON DELETE CASCADE,
+      installment_number INTEGER NOT NULL,
+      amount REAL NOT NULL,
+      due_date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'scheduled',
+      paid_transaction_id TEXT,
+      paid_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(plan_id, installment_number)
+    );
+
+    CREATE TABLE IF NOT EXISTS purchase_consultations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_name TEXT NOT NULL,
+      merchant TEXT,
+      category TEXT,
+      price REAL NOT NULL,
+      payment_mode TEXT NOT NULL DEFAULT 'cash',
+      urgency TEXT NOT NULL DEFAULT 'normal',
+      expected_uses_per_month REAL,
+      expected_months REAL,
+      recommendation TEXT NOT NULL,
+      utility_score INTEGER NOT NULL,
+      liquidity_score INTEGER NOT NULL,
+      cash_pressure_score INTEGER NOT NULL,
+      value_score INTEGER NOT NULL,
+      impulse_score INTEGER NOT NULL,
+      cash_on_hand REAL NOT NULL,
+      purchase_cash_impact REAL NOT NULL,
+      cash_after_purchase REAL NOT NULL,
+      bnpl_pressure_30 REAL NOT NULL,
+      bnpl_pressure_60 REAL NOT NULL,
+      bnpl_pressure_90 REAL NOT NULL,
+      savings_delay_days INTEGER,
+      value_per_use REAL,
+      value_usage_source TEXT,
+      impulse_guard_json TEXT,
+      rationale_json TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS purchase_decisions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      consultation_id INTEGER REFERENCES purchase_consultations(id),
+      decision TEXT NOT NULL,
+      note TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS asset_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      asset_name TEXT NOT NULL,
+      category TEXT,
+      purchase_price REAL,
+      usage_metric TEXT NOT NULL DEFAULT 'use',
+      quantity REAL NOT NULL DEFAULT 1,
+      used_at TEXT NOT NULL DEFAULT (date('now')),
+      note TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS strategic_friction_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      consultation_id INTEGER REFERENCES purchase_consultations(id),
+      action TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      points INTEGER NOT NULL DEFAULT 0,
+      amount_avoided REAL,
+      note TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS strategic_friction_commitments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      consultation_id INTEGER NOT NULL REFERENCES purchase_consultations(id),
+      type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      due_at TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      resolved_at TEXT,
+      resolution TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // Migrate: add logo and primary_color to institutions
@@ -288,4 +392,35 @@ export function migrate(db: Database.Database): void {
       )
     `);
   }
+
+  // Migrate: expand BNPL plans into a chronological pressure ledger
+  const bnplPlanCols = db.prepare(`PRAGMA table_info(bnpl_plans)`).all() as { name: string }[];
+  if (bnplPlanCols.length > 0) {
+    if (!bnplPlanCols.some(c => c.name === "provider")) db.exec(`ALTER TABLE bnpl_plans ADD COLUMN provider TEXT`);
+    if (!bnplPlanCols.some(c => c.name === "purchase_date")) db.exec(`ALTER TABLE bnpl_plans ADD COLUMN purchase_date TEXT`);
+    if (!bnplPlanCols.some(c => c.name === "purchase_transaction_id")) db.exec(`ALTER TABLE bnpl_plans ADD COLUMN purchase_transaction_id TEXT`);
+    if (!bnplPlanCols.some(c => c.name === "note")) db.exec(`ALTER TABLE bnpl_plans ADD COLUMN note TEXT`);
+  }
+
+  const consultCols = db.prepare(`PRAGMA table_info(purchase_consultations)`).all() as { name: string }[];
+  if (consultCols.length > 0 && !consultCols.some(c => c.name === "value_usage_source")) {
+    db.exec(`ALTER TABLE purchase_consultations ADD COLUMN value_usage_source TEXT`);
+  }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_bnpl_installments_due_status
+      ON bnpl_installments(due_date, status);
+    CREATE INDEX IF NOT EXISTS idx_bnpl_installments_plan
+      ON bnpl_installments(plan_id);
+    CREATE INDEX IF NOT EXISTS idx_purchase_consultations_created
+      ON purchase_consultations(created_at);
+    CREATE INDEX IF NOT EXISTS idx_asset_usage_asset
+      ON asset_usage(asset_name, used_at);
+    CREATE INDEX IF NOT EXISTS idx_asset_usage_category
+      ON asset_usage(category, used_at);
+    CREATE INDEX IF NOT EXISTS idx_strategic_friction_consultation
+      ON strategic_friction_events(consultation_id);
+    CREATE INDEX IF NOT EXISTS idx_strategic_friction_commitments_due
+      ON strategic_friction_commitments(status, due_at);
+  `);
 }

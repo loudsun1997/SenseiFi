@@ -59,6 +59,11 @@ const COMMANDS = [
   { name: "score", desc: "Show daily financial score and streaks" },
   { name: "alerts", desc: "Show financial alerts" },
   { name: "bills", desc: "Show upcoming bills" },
+  { name: "consult", desc: "Ask Sensei-Fi whether a purchase is worth it" },
+  { name: "decision", desc: "Record a purchase consult outcome" },
+  { name: "usage", desc: "Track value-per-use for assets" },
+  { name: "friction", desc: "Review active strategic friction commitments" },
+  { name: "bnpl", desc: "Track BNPL installment pressure" },
   { name: "recap", desc: "Monthly spending recap" },
   { name: "export", desc: "Export data to a backup file" },
   { name: "import", desc: "Restore data from a backup file" },
@@ -68,6 +73,7 @@ const COMMANDS = [
 ];
 
 const SPENDING_PERIODS = ["this_month", "last_month", "last_30", "last_90"];
+const BNPL_COMMANDS = ["add", "ledger", "paid", "scan"];
 
 function generateZsh(): string {
   const cmds = COMMANDS.map(c => `'${c.name}:${c.desc.replace(/'/g, "'\\''")}'`).join("\n    ");
@@ -99,6 +105,31 @@ function generateZsh(): string {
             '--category[Filter by category]:category:' \\
             '-m[Filter by merchant]:merchant:' \\
             '--merchant[Filter by merchant]:merchant:'
+          ;;
+        consult)
+          _arguments \\
+            '--price[Purchase price]:amount:' \\
+            '--category[Purchase category]:category:' \\
+            '--merchant[Merchant name]:merchant:' \\
+            '--urgency[Urgency level]:urgency:(low normal high)' \\
+            '--uses-per-month[Expected uses per month]:number:' \\
+            '--months[Expected months of use]:number:' \\
+            '--rent-cost[Rental/test cost]:amount:' \\
+            '--bnpl[Evaluate as BNPL]' \\
+            '--installments[BNPL installment count]:number:' \\
+            '--installment-amount[BNPL installment amount]:amount:' \\
+            '--down-payment[BNPL down payment]:amount:' \\
+            '--every[Days between installments]:days:' \\
+            '--no-save[Do not save consultation]'
+          ;;
+        bnpl)
+          _values 'bnpl command' ${BNPL_COMMANDS.map(c => `'${c}'`).join(" ")}
+          ;;
+        usage)
+          _values 'usage command' 'add'
+          ;;
+        friction)
+          _values 'friction command' 'resolve'
           ;;
         export)
           _files
@@ -138,6 +169,18 @@ _ray_completions() {
     transactions)
       COMPREPLY=( $(compgen -W "-n --limit -c --category -m --merchant" -- "$cur") )
       ;;
+    consult)
+      COMPREPLY=( $(compgen -W "--price --category --merchant --urgency --uses-per-month --months --rent-cost --bnpl --installments --installment-amount --down-payment --every --no-save" -- "$cur") )
+      ;;
+    bnpl)
+      COMPREPLY=( $(compgen -W "${BNPL_COMMANDS.join(" ")}" -- "$cur") )
+      ;;
+    usage)
+      COMPREPLY=( $(compgen -W "add --limit --category --price --metric --quantity --date --note" -- "$cur") )
+      ;;
+    friction)
+      COMPREPLY=( $(compgen -W "resolve --status --due-within active resolved expired dismissed all" -- "$cur") )
+      ;;
     export|import)
       COMPREPLY=( $(compgen -f -- "$cur") )
       ;;
@@ -160,6 +203,15 @@ function generateFish(): string {
     `complete -c ray -n '__fish_seen_subcommand_from transactions' -s n -l limit -d 'Number of transactions'`,
     `complete -c ray -n '__fish_seen_subcommand_from transactions' -s c -l category -d 'Filter by category'`,
     `complete -c ray -n '__fish_seen_subcommand_from transactions' -s m -l merchant -d 'Filter by merchant'`,
+    `complete -c ray -n '__fish_seen_subcommand_from consult' -l price -d 'Purchase price'`,
+    `complete -c ray -n '__fish_seen_subcommand_from consult' -l category -d 'Purchase category'`,
+    `complete -c ray -n '__fish_seen_subcommand_from consult' -l urgency -a 'low normal high' -d 'Urgency level'`,
+    `complete -c ray -n '__fish_seen_subcommand_from consult' -l bnpl -d 'Evaluate as BNPL'`,
+    `complete -c ray -n '__fish_seen_subcommand_from usage' -a 'add'`,
+    `complete -c ray -n '__fish_seen_subcommand_from usage' -l metric -a 'mile project hour use ride workout day' -d 'Usage metric'`,
+    `complete -c ray -n '__fish_seen_subcommand_from friction' -a 'resolve'`,
+    `complete -c ray -n '__fish_seen_subcommand_from friction' -l status -a 'active resolved expired dismissed all' -d 'Friction status'`,
+    `complete -c ray -n '__fish_seen_subcommand_from bnpl' -a '${BNPL_COMMANDS.join(" ")}'`,
     `complete -c ray -n '__fish_seen_subcommand_from export' -F`,
     `complete -c ray -n '__fish_seen_subcommand_from import' -F`,
   );

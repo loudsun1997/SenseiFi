@@ -6,6 +6,7 @@ import {
 } from "../queries/index.js";
 import { getLatestScore } from "../scoring/index.js";
 import { getUpcomingBills } from "../db/bills.js";
+import { getBnplPressure } from "../sensei/bnpl.js";
 
 const MAX_CHARS = 6000;
 
@@ -188,6 +189,16 @@ function buildUpcoming(db: Database.Database): string | null {
       return `${b.name} (${amt}${extra}) due in ${daysUntil} days`;
     });
     parts.push(`UPCOMING: ${billStrs.join(", ")}`);
+  }
+
+  const bnpl = getBnplPressure(db, { days: 90 });
+  if (bnpl.activePlanCount > 0) {
+    const thirty = bnpl.windows.find(w => w.days === 30)?.amount ?? 0;
+    parts.push(`BNPL PRESSURE: ${formatMoney(bnpl.remainingBnpl)} remaining across ${bnpl.activePlanCount} plan${bnpl.activePlanCount === 1 ? "" : "s"}; ${formatMoney(thirty)} due in 30 days`);
+    if (bnpl.collisions.length > 0) {
+      const c = bnpl.collisions[0];
+      parts.push(`BNPL COLLISION: ${c.date} has ${formatMoney(c.bnplAmount)} BNPL plus ${formatMoney(c.otherAmount)} bills (${c.names.join(", ")})`);
+    }
   }
 
   // Low balance warning

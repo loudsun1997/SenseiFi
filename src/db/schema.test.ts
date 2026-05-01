@@ -9,7 +9,7 @@ function freshDb() {
 }
 
 describe("migrate", () => {
-  it("creates all 18 tables", () => {
+  it("creates expected tables", () => {
     const db = freshDb();
     migrate(db);
 
@@ -22,6 +22,9 @@ describe("migrate", () => {
       "accounts",
       "achievements",
       "ai_audit_log",
+      "asset_usage",
+      "bnpl_installments",
+      "bnpl_plans",
       "budgets",
       "conversation_history",
       "daily_scores",
@@ -32,11 +35,15 @@ describe("migrate", () => {
       "memories",
       "milestones",
       "net_worth_history",
+      "purchase_consultations",
+      "purchase_decisions",
       "recategorization_rules",
       "recurring",
       "recurring_bills",
       "securities",
       "settings",
+      "strategic_friction_commitments",
+      "strategic_friction_events",
       "transactions",
     ];
 
