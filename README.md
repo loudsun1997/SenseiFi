@@ -22,6 +22,14 @@ Tell Ray about your family, goals, and financial strategy once. From then on, ev
 
 ## Features
 
+### Sensei-Fi additions in this fork
+
+This fork includes a Sensei-Fi decision layer on top of Ray. See:
+
+- `docs/senseifi-added-functionality.md`
+
+Highlights include BNPL cash-pressure ledgering, purchase consultant flows, VPU tracking, strategic friction, APR promo-term modeling, a local web dashboard/chat surface, and deterministic debt payoff simulators.
+
 ### It gets smarter every conversation
 
 - **Your situation, always loaded** — Every conversation starts with your financial profile: family, income, goals, strategy, key decisions, and open items. Ray reads it all before you type a word.
