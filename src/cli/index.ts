@@ -71,6 +71,15 @@ program
   });
 
 program
+  .command("gui")
+  .description("Open the local Sensei-Fi account dashboard")
+  .action(async () => {
+    ensureConfigured();
+    const { runGui } = await import("./commands.js");
+    await runGui();
+  });
+
+program
   .command("add")
   .description("Add a manual account (home, car, crypto, etc.)")
   .action(async () => {
@@ -414,6 +423,16 @@ program
     seedDemoDb(demoPath);
   });
 
+program
+  .command("demo-sensei")
+  .description("Seed a demo database with Sensei-Fi purchase decision data")
+  .option("--path <path>", "Output database path")
+  .action(async (opts) => {
+    const demoPath = opts.path ? resolve(opts.path) : resolve(homedir(), ".ray", "data", "sensei-demo.db");
+    const { seedSenseiDemoDb } = await import("../demo/sensei-seed.js");
+    seedSenseiDemoDb(demoPath);
+  });
+
 
 function ensureConfigured(): void {
   if (isDemoMode) return;
@@ -427,6 +446,7 @@ function ensureConfigured(): void {
 program.configureHelp({
   formatHelp: () => helpScreen([
     { name: "setup", desc: "Configure Ray (API keys, preferences)" },
+    { name: "gui", desc: "Open account linking, sync, and accounts dashboard" },
     { name: "link", desc: "Link a new financial account via Plaid" },
     { name: "add", desc: "Add a manual account (home, car, crypto, etc.)" },
     { name: "remove", desc: "Remove a linked bank or manual account" },
@@ -452,6 +472,7 @@ program.configureHelp({
     { name: "update", desc: "Update Ray to the latest version" },
     { name: "doctor", desc: "Check system health" },
     { name: "demo", desc: "Seed a demo database with fake data" },
+    { name: "demo-sensei", desc: "Seed a demo database with Sensei-Fi data" },
   ]),
 });
 

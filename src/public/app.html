@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="/favicon.png">
+  <title>Sensei-Fi</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #f7f7f4;
+      color: #202023;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      border-bottom: 1px solid #deded8;
+      background: #ffffff;
+    }
+    .bar, main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+    }
+    .bar {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 0;
+    }
+    .brand h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 650;
+    }
+    .brand span {
+      color: #6f6f67;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    button {
+      border: 1px solid #c9c9c2;
+      background: #ffffff;
+      color: #202023;
+      min-height: 36px;
+      padding: 0 14px;
+      border-radius: 6px;
+      font: inherit;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button.primary {
+      border-color: #202023;
+      background: #202023;
+      color: #ffffff;
+    }
+    button:disabled {
+      opacity: 0.48;
+      cursor: wait;
+    }
+    main {
+      padding: 24px 0 40px;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .metric, .panel, .empty {
+      background: #ffffff;
+      border: 1px solid #deded8;
+      border-radius: 8px;
+    }
+    .metric {
+      padding: 16px;
+      min-height: 92px;
+    }
+    .label {
+      margin: 0 0 8px;
+      color: #6f6f67;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .value {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 650;
+      line-height: 1.15;
+    }
+    .sub {
+      margin: 6px 0 0;
+      color: #6f6f67;
+      font-size: 13px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 16px;
+      align-items: start;
+    }
+    .accounts-panel {
+      margin-top: 16px;
+    }
+    .panel h2 {
+      margin: 0;
+      padding: 16px 16px 12px;
+      border-bottom: 1px solid #ededeb;
+      font-size: 15px;
+      font-weight: 650;
+    }
+    .analysis-wrap {
+      padding: 16px;
+      display: grid;
+      gap: 16px;
+    }
+    .analysis-top {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .mini-metric {
+      border: 1px solid #ededeb;
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 82px;
+      background: #fbfbfa;
+    }
+    .mini-metric .value {
+      font-size: 19px;
+    }
+    .analysis-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .analysis-section {
+      border-top: 1px solid #ededeb;
+      padding-top: 12px;
+      min-width: 0;
+    }
+    .analysis-section h3 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .kv {
+      display: grid;
+      grid-template-columns: minmax(120px, 1fr) auto;
+      gap: 8px;
+      padding: 6px 0;
+      border-top: 1px solid #f3f3f0;
+      font-size: 13px;
+    }
+    .kv:first-of-type { border-top: 0; }
+    .kv span:first-child {
+      color: #6f6f67;
+      min-width: 0;
+    }
+    .kv span:last-child {
+      text-align: right;
+      font-weight: 560;
+    }
+    .insights {
+      display: grid;
+      gap: 8px;
+    }
+    .insight {
+      border: 1px solid #ededeb;
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #fbfbfa;
+    }
+    .insight.risk { border-color: #f0b4ad; background: #fff8f7; }
+    .insight.watch { border-color: #ead69a; background: #fffdf2; }
+    .insight.positive { border-color: #b9d8bf; background: #f7fff8; }
+    .insight-title {
+      margin: 0 0 4px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .insight-detail {
+      margin: 0;
+      color: #5f5f58;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .chart {
+      height: 112px;
+      display: flex;
+      align-items: end;
+      gap: 3px;
+      padding-top: 8px;
+      border-top: 1px solid #f0f0ed;
+      overflow: hidden;
+    }
+    .barline {
+      flex: 1;
+      min-width: 2px;
+      background: #536f67;
+      border-radius: 2px 2px 0 0;
+      opacity: 0.84;
+    }
+    .barline.low { background: #4f7c5d; }
+    .barline.mid { background: #b88b2f; }
+    .barline.high { background: #b34a3f; }
+    .institution {
+      padding: 14px 16px 16px;
+      border-bottom: 1px solid #ededeb;
+    }
+    .institution:last-child { border-bottom: 0; }
+    .institution-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .institution-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .institution-name {
+      font-weight: 650;
+      min-width: 0;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: #eef1e8;
+      color: #4f5b42;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .small-action {
+      min-height: 28px;
+      padding: 0 10px;
+      font-size: 12px;
+    }
+    .small-action.ghost {
+      background: #fbfbfa;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    th, td {
+      padding: 9px 0;
+      border-top: 1px solid #f0f0ed;
+      text-align: left;
+      font-size: 14px;
+      vertical-align: middle;
+    }
+    th {
+      color: #77776f;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    td:last-child, th:last-child { text-align: right; }
+    .account-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding-right: 10px;
+    }
+    .apr-column {
+      text-align: left !important;
+      width: 320px;
+      padding-left: 12px;
+      padding-right: 0;
+    }
+    .apr-cell {
+      text-align: left !important;
+      padding-left: 12px;
+      padding-right: 0;
+    }
+    .apr-status {
+      margin-bottom: 6px;
+      font-size: 12px;
+      line-height: 1.3;
+    }
+    .apr-editor {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-start;
+    }
+    .apr-date {
+      min-height: 28px;
+      border: 1px solid #c9c9c2;
+      border-radius: 6px;
+      padding: 0 8px;
+      font: inherit;
+      font-size: 12px;
+      color: #202023;
+      background: #ffffff;
+      min-width: 145px;
+    }
+    .muted { color: #77776f; }
+    .side {
+      display: grid;
+      gap: 12px;
+    }
+    .side .panel {
+      padding: 16px;
+    }
+    .side h2 {
+      padding: 0;
+      border: 0;
+      margin-bottom: 12px;
+    }
+    .log {
+      min-height: 80px;
+      max-height: 220px;
+      overflow: auto;
+      display: grid;
+      gap: 8px;
+    }
+    .log div {
+      color: #5f5f58;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .empty {
+      padding: 28px;
+      text-align: center;
+      color: #686860;
+    }
+    .error {
+      color: #b42318;
+    }
+    .helper p {
+      margin: 0 0 12px;
+      color: #5f5f58;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    .helper button {
+      width: 100%;
+    }
+    @media (max-width: 860px) {
+      .bar {
+        align-items: flex-start;
+        flex-direction: column;
+        padding: 14px 0;
+      }
+      .actions { justify-content: flex-start; }
+      .summary, .layout { grid-template-columns: 1fr; }
+      .analysis-top, .analysis-grid { grid-template-columns: 1fr; }
+      .value { font-size: 22px; }
+      .apr-column, .apr-cell {
+        width: auto;
+        padding-left: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <div class="brand">
+        <h1>Sensei-Fi</h1>
+        <span id="status">Loading</span>
+      </div>
+      <div class="actions">
+        <button id="connect" class="primary" type="button">Connect</button>
+        <button id="sync" type="button">Sync</button>
+        <button id="analyze" type="button">Analyze</button>
+        <button id="refresh" type="button">Refresh</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="summary" aria-label="Summary">
+      <div class="metric">
+        <p class="label">Net Worth</p>
+        <p class="value" id="net-worth">$0.00</p>
+        <p class="sub" id="net-worth-sub">-</p>
+      </div>
+      <div class="metric">
+        <p class="label">Cash</p>
+        <p class="value" id="cash">$0.00</p>
+        <p class="sub" id="cash-sub">Depository accounts</p>
+      </div>
+      <div class="metric">
+        <p class="label">Debt</p>
+        <p class="value" id="debt">$0.00</p>
+        <p class="sub" id="debt-sub">Credit and loans</p>
+      </div>
+      <div class="metric">
+        <p class="label">Transactions</p>
+        <p class="value" id="transactions">0</p>
+        <p class="sub" id="last-transaction">No transactions</p>
+      </div>
+    </section>
+
+    <section class="layout">
+      <div>
+        <div class="panel analysis-panel">
+          <h2>Analysis Cockpit</h2>
+          <div id="analysis"></div>
+        </div>
+        <div class="panel accounts-panel">
+          <h2>Accounts</h2>
+          <div id="accounts"></div>
+        </div>
+      </div>
+      <aside class="side">
+        <div class="panel helper">
+          <h2>Assistant</h2>
+          <p>Use the dedicated chat page for longer conversations and financial Q&A.</p>
+          <button id="open-chat" class="primary" type="button">Open Chat</button>
+        </div>
+        <div class="panel">
+          <h2>Connection</h2>
+          <div class="log" id="log"></div>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+  <script>
+    const sessionId = window.location.pathname.split('/app/')[1];
+    const statusEl = document.getElementById('status');
+    const logEl = document.getElementById('log');
+    const openChatEl = document.getElementById('open-chat');
+    const buttons = {
+      connect: document.getElementById('connect'),
+      sync: document.getElementById('sync'),
+      analyze: document.getElementById('analyze'),
+      refresh: document.getElementById('refresh'),
+    };
+
+    function money(value) {
+      return Number(value || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+    }
+
+    function setBusy(isBusy, text) {
+      statusEl.textContent = text || (isBusy ? 'Working' : 'Ready');
+      Object.values(buttons).forEach(button => { button.disabled = isBusy; });
+    }
+
+    function log(message, tone) {
+      const line = document.createElement('div');
+      if (tone === 'error') line.className = 'error';
+      line.textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + ' - ' + message;
+      logEl.prepend(line);
+    }
+
+    async function loadAccounts() {
+      setBusy(true, 'Refreshing');
+      try {
+        const res = await fetch('/api/accounts');
+        if (!res.ok) throw new Error('Could not load accounts');
+        render(await res.json());
+        setBusy(false, 'Ready');
+      } catch (error) {
+        setBusy(false, 'Error');
+        log(error.message || 'Could not load accounts', 'error');
+      }
+    }
+
+    async function loadAnalysis() {
+      try {
+        const res = await fetch('/api/analysis');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not load analysis');
+        renderAnalysis(data.analysis);
+      } catch (error) {
+        document.getElementById('analysis').innerHTML = '<div class="empty">Analysis will appear after transactions sync.</div>';
+        log(error.message || 'Could not load analysis', 'error');
+      }
+    }
+
+    function render(snapshot) {
+      document.getElementById('net-worth').textContent = money(snapshot.netWorth.net_worth);
+      const change = snapshot.netWorth.prev_net_worth == null ? null : snapshot.netWorth.net_worth - snapshot.netWorth.prev_net_worth;
+      document.getElementById('net-worth-sub').textContent = change == null ? 'No prior snapshot' : (change >= 0 ? '+' : '') + money(change) + ' from prior snapshot';
+      document.getElementById('cash').textContent = money(snapshot.netWorth.cash);
+      document.getElementById('debt').textContent = money(snapshot.netWorth.credit_debt + snapshot.netWorth.mortgage);
+      document.getElementById('transactions').textContent = String(snapshot.transactionCount || 0);
+      document.getElementById('last-transaction').textContent = snapshot.lastTransactionDate ? 'Latest ' + snapshot.lastTransactionDate : 'No transactions';
+
+      const container = document.getElementById('accounts');
+      container.innerHTML = '';
+      const institutions = snapshot.institutions || [];
+      if (institutions.length === 0) {
+        container.innerHTML = '<div class="empty">No accounts connected.</div>';
+        return;
+      }
+
+      institutions.forEach(institution => {
+        const section = document.createElement('section');
+        section.className = 'institution';
+        const accounts = institution.accounts || [];
+        section.innerHTML = [
+          '<div class="institution-head">',
+          '<div class="institution-name">' + escapeHtml(institution.name) + '</div>',
+          '<div class="institution-actions">',
+          '<button class="small-action add-accounts" type="button" data-item-id="' + escapeHtml(institution.item_id) + '" data-name="' + escapeHtml(institution.name) + '">Add accounts</button>',
+          '<div class="pill">' + accounts.length + ' account' + (accounts.length === 1 ? '' : 's') + '</div>',
+          '</div>',
+          '</div>',
+          accountTable(accounts),
+        ].join('');
+        container.appendChild(section);
+      });
+    }
+
+    function accountTable(accounts) {
+      if (accounts.length === 0) return '<div class="muted">No accounts returned yet.</div>';
+      const rows = accounts.map(account => {
+        const label = [account.subtype || account.type, account.mask ? '••' + account.mask : ''].filter(Boolean).join(' ');
+        const isDebt = account.type === 'credit' || account.type === 'loan';
+        const aprCell = isDebt
+          ? [
+              '<div class="apr-status muted">' + escapeHtml(account.apr_label || 'APR defaulted') + '</div>',
+              '<div class="apr-editor">',
+              '<input class="apr-date" type="date" value="' + escapeHtml(account.promo_end_date || '') + '" data-account-id="' + escapeHtml(account.account_id) + '" aria-label="Promo end date for ' + escapeHtml(account.name) + '">',
+              '<button class="small-action save-apr" type="button" data-account-id="' + escapeHtml(account.account_id) + '">Save</button>',
+              '<button class="small-action ghost clear-apr" type="button" data-account-id="' + escapeHtml(account.account_id) + '">Clear</button>',
+              '</div>',
+            ].join('')
+          : '<span class="muted">Not applicable</span>';
+        return '<tr><td class="account-name">' + escapeHtml(account.name) + '<div class="muted">' + escapeHtml(label) + '</div></td><td>' + money(account.current_balance) + '</td><td class="apr-cell">' + aprCell + '</td></tr>';
+      }).join('');
+      return '<table><thead><tr><th>Account</th><th>Balance</th><th class="apr-column">APR / Promo</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
+    async function saveAprTerms(accountId, promoEndDate) {
+      setBusy(true, promoEndDate ? 'Saving APR terms' : 'Clearing APR terms');
+      try {
+        const res = await fetch('/api/apr-terms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            account_id: accountId,
+            promo_end_date: promoEndDate || '',
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not save APR terms');
+        render(data.snapshot);
+        await loadAnalysis();
+        log(promoEndDate ? 'Promo APR term saved' : 'Promo APR term cleared');
+        setBusy(false, 'Ready');
+      } catch (error) {
+        setBusy(false, 'Error');
+        log(error.message || 'Could not save APR terms', 'error');
+      }
+    }
+
+    async function syncNow() {
+      setBusy(true, 'Syncing');
+      log('Sync started');
+      try {
+        const res = await fetch('/api/sync', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Sync failed');
+        render(data.snapshot);
+        if (data.analysis) renderAnalysis(data.analysis);
+        const added = data.result?.transactionsAdded || 0;
+        log('Sync and analysis complete. ' + added + ' new transaction' + (added === 1 ? '' : 's') + '.');
+        setBusy(false, 'Ready');
+      } catch (error) {
+        setBusy(false, 'Error');
+        log(error.message || 'Sync failed', 'error');
+      }
+    }
+
+    async function analyzeNow() {
+      setBusy(true, 'Analyzing');
+      log('Analysis started');
+      try {
+        const res = await fetch('/api/analyze', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Analysis failed');
+        renderAnalysis(data.analysis);
+        log('Analysis complete');
+        setBusy(false, 'Ready');
+      } catch (error) {
+        setBusy(false, 'Error');
+        log(error.message || 'Analysis failed', 'error');
+      }
+    }
+
+    function renderAnalysis(analysis) {
+      const container = document.getElementById('analysis');
+      if (!analysis) {
+        container.innerHTML = '<div class="empty">Analysis will appear after transactions sync.</div>';
+        return;
+      }
+
+      const pressure = analysis.paycheckPressureMap?.periods || [];
+      const obligations = (analysis.recurringObligationCalendar?.obligations || []).slice(0, 6);
+      const debts = (analysis.debtAvalanche?.payoffOrder || []).slice(0, 5);
+      const scenarios = analysis.scenarioSimulation?.scenarios || [];
+      const allocation = analysis.investmentAllocation?.allocation || [];
+      const insights = (analysis.insights || []).slice(0, 5);
+      const forecastPoints = (analysis.futureAccountBalanceSimulation?.points || []).filter((_, index) => index % 4 === 0).slice(0, 23);
+      const minCash = Math.min(...forecastPoints.map(p => p.cash), 0);
+      const maxCash = Math.max(...forecastPoints.map(p => p.cash), 1);
+
+      container.innerHTML = [
+        '<div class="analysis-wrap">',
+        '<div class="analysis-top">',
+        miniMetric('Safe to spend', money(analysis.trueAffordability?.safeToSpendToday), analysis.trueAffordability?.affordabilityBand || 'unknown'),
+        miniMetric('Next paycheck', analysis.paycheckCycle?.nextPaycheckDate || 'Not detected', money(analysis.paycheckCycle?.averagePaycheck || 0)),
+        miniMetric('30d obligations', money(analysis.recurringObligationCalendar?.next30Days), 'calendar'),
+        miniMetric('Emergency runway', (analysis.emergencyFundRunway?.runwayMonths || 0).toFixed(1) + ' mo', money(analysis.emergencyFundRunway?.gapToSixMonths || 0) + ' to 6 mo'),
+        '</div>',
+        '<div class="insights">' + insights.map(renderInsight).join('') + '</div>',
+        '<div class="analysis-grid">',
+        section('Cash-flow forecast', [
+          kv('Monthly income', money(analysis.cashFlowForecast?.monthlyIncome)),
+          kv('Fixed obligations', money(analysis.cashFlowForecast?.monthlyFixedObligations)),
+          kv('Variable spend', money(analysis.cashFlowForecast?.monthlyVariableSpend)),
+          kv('Projected 90d cash', money(analysis.cashFlowForecast?.projectedCash90)),
+        ].join('') + forecastChart(forecastPoints, minCash, maxCash)),
+        section('Paycheck pressure map', pressure.map(p => kv(p.startDate + ' to ' + p.endDate, money(p.endingCash) + ' - ' + p.pressure)).join('') || emptyLine('No paycheck cycle detected yet.')),
+        section('Obligation calendar', obligations.map(o => kv(o.date + ' - ' + escapeHtml(o.name), money(o.amount))).join('') || emptyLine('No upcoming obligations detected.')),
+        section('Debt avalanche', [
+          kv('Total debt', money(analysis.debtAvalanche?.totalDebt)),
+          kv('Monthly minimums', money(analysis.debtAvalanche?.monthlyMinimums)),
+          debts.map(d => kv('#' + d.priority + ' ' + escapeHtml(d.accountName), money(d.balance) + ' @ ' + d.apr + '%')).join('') || emptyLine('No active debts found.'),
+        ].join('')),
+        section('Retirement projection', [
+          kv('Current investments', money(analysis.retirementProjection?.currentInvestments)),
+          kv('Monthly contribution', money(analysis.retirementProjection?.monthlyContributionEstimate)),
+          kv('20-year projection', money(analysis.retirementProjection?.projected20Year)),
+          kv('30-year projection', money(analysis.retirementProjection?.projected30Year)),
+        ].join('')),
+        section('Scenario simulation', scenarios.map(s => kv(escapeHtml(s.name), money(s.projectedCash90) + ' - ' + s.pressure)).join('')),
+        section('Tax-aware planning', [
+          kv('Annual gross estimate', money(analysis.taxAwarePlanning?.estimatedAnnualGrossIncome)),
+          kv('Federal + FICA estimate', money(analysis.taxAwarePlanning?.estimatedFederalAndFicaTax)),
+          kv('Effective rate', (analysis.taxAwarePlanning?.estimatedEffectiveRatePct || 0).toFixed(1) + '%'),
+          kv('Pretax opportunity', money(analysis.taxAwarePlanning?.pretaxContributionOpportunity)),
+        ].join('')),
+        section('Investment allocation', allocation.map(a => kv(escapeHtml(a.label), money(a.amount) + ' - ' + a.pct + '%')).join('') || emptyLine('No holdings-level allocation yet.')),
+        '</div>',
+        '</div>',
+      ].join('');
+    }
+
+    function miniMetric(label, value, sub) {
+      return '<div class="mini-metric"><p class="label">' + escapeHtml(label) + '</p><p class="value">' + escapeHtml(value) + '</p><p class="sub">' + escapeHtml(sub) + '</p></div>';
+    }
+
+    function renderInsight(insight) {
+      return '<div class="insight ' + escapeHtml(insight.severity || '') + '"><p class="insight-title">' + escapeHtml(insight.title) + '</p><p class="insight-detail">' + escapeHtml(insight.detail) + '</p></div>';
+    }
+
+    function section(title, body) {
+      return '<div class="analysis-section"><h3>' + escapeHtml(title) + '</h3>' + body + '</div>';
+    }
+
+    function kv(label, value) {
+      return '<div class="kv"><span>' + label + '</span><span>' + escapeHtml(value ?? '-') + '</span></div>';
+    }
+
+    function emptyLine(text) {
+      return '<div class="muted">' + escapeHtml(text) + '</div>';
+    }
+
+    function forecastChart(points, minCash, maxCash) {
+      if (!points.length) return '';
+      const range = Math.max(1, maxCash - minCash);
+      const bars = points.map(p => {
+        const height = Math.max(8, Math.round(((p.cash - minCash) / range) * 100));
+        const tone = p.cash < 0 ? 'high' : p.cash < maxCash * 0.35 ? 'mid' : 'low';
+        return '<div class="barline ' + tone + '" title="' + escapeHtml(p.date + ': ' + money(p.cash)) + '" style="height:' + height + '%"></div>';
+      }).join('');
+      return '<div class="chart" aria-label="Projected cash chart">' + bars + '</div>';
+    }
+
+    async function connectAccount() {
+      setBusy(true, 'Opening Plaid');
+      try {
+        await waitForPlaid();
+        const res = await fetch('/api/link-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not create Plaid link');
+
+        const handler = Plaid.create({
+          token: data.link_token,
+          onSuccess: async (publicToken, metadata) => {
+            setBusy(true, 'Linking');
+            log('Linking ' + (metadata.institution?.name || 'account'));
+            try {
+              const resp = await fetch('/api/exchange', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  public_token: publicToken,
+                  session_id: sessionId,
+                  institution_name: metadata.institution?.name || 'Bank Account',
+                  institution_id: metadata.institution?.institution_id || null,
+                }),
+              });
+              const result = await resp.json().catch(() => ({}));
+              if (!resp.ok) throw new Error(result.error || 'Could not link account');
+              render(result.snapshot);
+              log((result.institution_name || metadata.institution?.name || 'Account') + ' connected');
+              setBusy(false, 'Ready');
+            } catch (error) {
+              setBusy(false, 'Error');
+              log(error.message || 'Could not link account', 'error');
+            }
+          },
+          onExit: (err) => {
+            setBusy(false, 'Ready');
+            log(err ? 'Plaid connection cancelled' : 'Plaid closed');
+          },
+        });
+        handler.open();
+      } catch (error) {
+        setBusy(false, 'Error');
+        log(error.message || 'Could not open Plaid', 'error');
+      }
+    }
+
+    async function addAccountsForInstitution(itemId, institutionName) {
+      setBusy(true, 'Opening Plaid');
+      try {
+        await waitForPlaid();
+        const res = await fetch('/api/update-link-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId, item_id: itemId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not start account update');
+
+        const handler = Plaid.create({
+          token: data.link_token,
+          onSuccess: async (_publicToken, metadata) => {
+            setBusy(true, 'Updating accounts');
+            const selected = metadata.accounts ? metadata.accounts.length : 0;
+            log('Updating ' + institutionName + (selected ? ' with ' + selected + ' selected account' + (selected === 1 ? '' : 's') : ''));
+            try {
+              const resp = await fetch('/api/update-complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId, item_id: itemId }),
+              });
+              const result = await resp.json().catch(() => ({}));
+              if (!resp.ok) throw new Error(result.error || 'Could not update account selection');
+              render(result.snapshot);
+              const count = result.summary?.accountCount;
+              log(institutionName + ' updated' + (count == null ? '' : ' - ' + count + ' shared account' + (count === 1 ? '' : 's')));
+              setBusy(false, 'Ready');
+            } catch (error) {
+              setBusy(false, 'Error');
+              log(error.message || 'Could not update account selection', 'error');
+            }
+          },
+          onExit: (err) => {
+            setBusy(false, 'Ready');
+            log(err ? institutionName + ' account update cancelled' : institutionName + ' account update closed');
+          },
+        });
+        handler.open();
+      } catch (error) {
+        setBusy(false, 'Error');
+        log(error.message || 'Could not open account update', 'error');
+      }
+    }
+
+    function waitForPlaid() {
+      if (typeof Plaid !== 'undefined') return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        let attempts = 0;
+        const timer = setInterval(() => {
+          if (typeof Plaid !== 'undefined') {
+            clearInterval(timer);
+            resolve();
+          } else if (++attempts > 50) {
+            clearInterval(timer);
+            reject(new Error('Plaid did not load. Check network or content blockers.'));
+          }
+        }, 100);
+      });
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[char]));
+    }
+
+    buttons.connect.addEventListener('click', connectAccount);
+    buttons.sync.addEventListener('click', syncNow);
+    buttons.analyze.addEventListener('click', analyzeNow);
+    buttons.refresh.addEventListener('click', loadAccounts);
+    openChatEl.addEventListener('click', () => {
+      window.location.href = '/chat/' + sessionId;
+    });
+    document.getElementById('accounts').addEventListener('click', event => {
+      const button = event.target.closest('.add-accounts');
+      if (button) {
+        addAccountsForInstitution(button.dataset.itemId, button.dataset.name || 'Institution');
+        return;
+      }
+      const save = event.target.closest('.save-apr');
+      if (save) {
+        const row = save.closest('tr');
+        const input = row ? row.querySelector('.apr-date') : null;
+        const promoEndDate = input ? input.value : '';
+        saveAprTerms(save.dataset.accountId, promoEndDate);
+        return;
+      }
+      const clear = event.target.closest('.clear-apr');
+      if (clear) {
+        saveAprTerms(clear.dataset.accountId, '');
+      }
+    });
+    loadAccounts().then(loadAnalysis);
+  </script>
+</body>
+</html>

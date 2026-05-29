@@ -59,6 +59,27 @@
     }
     button:hover { opacity: 0.85; }
     button:disabled { opacity: 0.3; cursor: not-allowed; }
+    .button-row { display: grid; gap: 10px; margin-top: 18px; }
+    .secondary {
+      background: transparent;
+      color: #ffffff;
+      border: 1px solid #4a4a4f;
+    }
+    .linked-list {
+      list-style: none;
+      margin: 18px 0 0;
+      text-align: left;
+      display: grid;
+      gap: 8px;
+    }
+    .linked-list li {
+      border: 1px solid #343438;
+      border-radius: 6px;
+      padding: 10px 12px;
+      color: #d7d7db;
+      font-size: 12px;
+    }
+    .hint { margin-top: 14px; margin-bottom: 0; font-size: 11px; color: #71717a; }
     .success { color: #34d399; font-weight: 500; }
     .error { color: #f87171; font-size: 13px; margin-top: 16px; }
     .success-title-check {
@@ -96,15 +117,25 @@
   <div class="top-logo"><img src="/ray-logo-dark.png" alt="Ray"></div>
   <div class="container">
     <div id="connect-view">
-      <div class="spinner"></div>
-      <h1>Connecting</h1>
-      <p>Opening Plaid...</p>
+      <h1>Connect Accounts</h1>
+      <p>Use Plaid to connect every bank or account you want Sensei-Fi to include.</p>
+      <div class="button-row">
+        <button id="start-link" type="button">Connect bank or account</button>
+        <button id="finish-empty" class="secondary" type="button">Finish without linking more</button>
+      </div>
       <div id="error" class="error" style="display:none"></div>
     </div>
     <div id="success-view" style="display:none">
       <img id="institution-logo" class="institution-logo" style="display:none" alt="">
       <h1 class="success" id="success-title"><svg class="success-title-check" viewBox="0 0 24 24"><polyline points="4 12 10 18 20 6"/></svg>Account Connected</h1>
-      <p>Syncing transactions. Data stays on your machine. You can close this page.</p>
+      <p id="success-copy">Syncing transactions. Data stays on your machine.</p>
+      <ul id="linked-list" class="linked-list"></ul>
+      <div class="button-row">
+        <button id="connect-another" type="button">Connect another bank or account</button>
+        <button id="finish" class="secondary" type="button">Finish and return to terminal</button>
+      </div>
+      <p class="hint">To add more accounts at the same bank, choose this bank again. If Plaid skips account selection, your bank may require an update-mode flow.</p>
+      <div id="success-error" class="error" style="display:none"></div>
     </div>
   </div>
   <div class="trust">
@@ -116,8 +147,11 @@
   <script>
     const sessionId = window.location.pathname.split('/link/')[1];
     let linkHandler = null;
+    let linkedInstitutions = [];
+    let isFinishing = false;
 
     async function initPlaid() {
+      showConnecting('Opening Plaid...', true);
       // Wait for Plaid SDK to load
       if (typeof Plaid === 'undefined') {
         let attempts = 0;
@@ -143,8 +177,7 @@
         linkHandler = Plaid.create({
           token: link_token,
           onSuccess: async (publicToken, metadata) => {
-            document.getElementById('connect-view').innerHTML = '<div class="spinner"></div><h1>Linking</h1><p>Syncing ' + (metadata.institution?.name || 'account') + '...</p>';
-            document.getElementById('connect-view').style.display = 'block';
+            showConnecting('Syncing ' + (metadata.institution?.name || 'account') + '...', false);
             try {
               const resp = await fetch('/api/exchange', {
                 method: 'POST',
@@ -158,41 +191,133 @@
               });
               if (!resp.ok) throw new Error('Exchange failed');
               const result = await resp.json();
-              document.getElementById('connect-view').style.display = 'none';
-              document.getElementById('success-view').style.display = 'block';
               const instName = result.institution_name || metadata.institution?.name;
-              if (instName) {
-                const titleEl = document.getElementById('success-title');
-                titleEl.innerHTML = titleEl.querySelector('svg').outerHTML + instName + ' Connected';
-              }
-              if (result.institution_logo) {
-                const logoEl = document.getElementById('institution-logo');
-                logoEl.src = 'data:image/png;base64,' + result.institution_logo;
-                logoEl.style.display = 'inline-block';
-              }
+              showSuccess(instName || 'Account', result.institution_logo || null);
             } catch (e) {
-              showError('Failed to link account. Please try again with "ray link".');
+              showError('Failed to link account. Please try again.');
             }
           },
           onExit: (err) => {
-            document.getElementById('connect-view').style.display = 'block';
-            if (err) showError('Connection cancelled. You can try again.');
+            if (linkedInstitutions.length > 0) {
+              showSuccess(null, null, err ? 'Connection cancelled. Your previous connections are still saved.' : null);
+            } else {
+              showReady(err ? 'Connection cancelled. You can try again or finish.' : 'No account was connected. You can try again or finish.');
+            }
           },
         });
         linkHandler.open();
         document.getElementById('connect-view').style.display = 'none';
       } catch (e) {
-        showError(e.message || 'This link has expired. Please run "ray link" again.');
+        showReady(e.message || 'This link has expired. Please run "ray link" again.');
+      }
+    }
+
+    function showReady(errorMessage) {
+      const connectView = document.getElementById('connect-view');
+      connectView.innerHTML = '<h1>Connect Accounts</h1><p>Use Plaid to connect every bank or account you want Sensei-Fi to include.</p><div class="button-row"><button id="start-link" type="button">Connect bank or account</button><button id="finish-empty" class="secondary" type="button">Finish without linking more</button></div><div id="error" class="error" style="display:none"></div>';
+      connectView.style.display = 'block';
+      document.getElementById('success-view').style.display = 'none';
+      document.getElementById('start-link').addEventListener('click', () => initPlaid());
+      document.getElementById('finish-empty').addEventListener('click', finish);
+      if (errorMessage) showError(errorMessage);
+    }
+
+    function showConnecting(message, opening) {
+      const connectView = document.getElementById('connect-view');
+      connectView.innerHTML = '<div class="spinner"></div><h1>' + (opening ? 'Connecting' : 'Linking') + '</h1><p>' + message + '</p><div id="error" class="error" style="display:none"></div>';
+      connectView.style.display = 'block';
+      document.getElementById('success-view').style.display = 'none';
+    }
+
+    function showSuccess(institutionName, logo, notice) {
+      if (institutionName) linkedInstitutions.push(institutionName);
+      document.getElementById('connect-view').style.display = 'none';
+      document.getElementById('success-view').style.display = 'block';
+
+      const latest = institutionName || linkedInstitutions[linkedInstitutions.length - 1] || 'Account';
+      const titleEl = document.getElementById('success-title');
+      titleEl.innerHTML = titleEl.querySelector('svg').outerHTML + latest + ' Connected';
+
+      const count = linkedInstitutions.length;
+      document.getElementById('success-copy').textContent = count === 1
+        ? '1 connection is syncing. Connect more accounts now, or finish when you are done.'
+        : count + ' connections are syncing. Connect more accounts now, or finish when you are done.';
+
+      const list = document.getElementById('linked-list');
+      list.innerHTML = '';
+      linkedInstitutions.forEach((name, index) => {
+        const item = document.createElement('li');
+        item.textContent = (index + 1) + '. ' + name;
+        list.appendChild(item);
+      });
+
+      const logoEl = document.getElementById('institution-logo');
+      if (logo) {
+        logoEl.src = 'data:image/png;base64,' + logo;
+        logoEl.style.display = 'inline-block';
+      } else {
+        logoEl.style.display = 'none';
+      }
+
+      const noticeEl = document.getElementById('success-error');
+      noticeEl.style.display = 'none';
+      if (notice) {
+        noticeEl.textContent = notice;
+        noticeEl.style.display = 'block';
       }
     }
 
     function showError(msg) {
-      const el = document.getElementById('error');
+      const successVisible = document.getElementById('success-view').style.display !== 'none';
+      const el = document.getElementById(successVisible ? 'success-error' : 'error');
       el.textContent = msg;
       el.style.display = 'block';
     }
 
-    initPlaid();
+    async function finish() {
+      if (isFinishing) return;
+      isFinishing = true;
+      for (const id of ['finish', 'finish-empty', 'connect-another', 'start-link']) {
+        const el = document.getElementById(id);
+        if (el) el.disabled = true;
+      }
+      try {
+        await fetch('/api/finish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId }),
+        });
+        showFinished();
+      } catch {
+        isFinishing = false;
+        for (const id of ['finish', 'finish-empty', 'connect-another', 'start-link']) {
+          const el = document.getElementById(id);
+          if (el) el.disabled = false;
+        }
+        showError('Could not finish the session. You can close this page and stop the terminal command.');
+      }
+    }
+
+    function showFinished() {
+      document.getElementById('connect-view').style.display = 'none';
+      document.getElementById('success-view').style.display = 'block';
+      document.getElementById('institution-logo').style.display = 'none';
+      const titleEl = document.getElementById('success-title');
+      titleEl.innerHTML = titleEl.querySelector('svg').outerHTML + 'Finished';
+      const count = linkedInstitutions.length;
+      document.getElementById('success-copy').textContent = count > 0
+        ? 'Your connections are syncing. You can close this page and return to the terminal.'
+        : 'No new connections were added. You can close this page and return to the terminal.';
+      document.getElementById('connect-another').style.display = 'none';
+      document.getElementById('finish').style.display = 'none';
+      document.querySelector('.hint').style.display = 'none';
+      document.getElementById('success-error').style.display = 'none';
+    }
+
+    document.getElementById('start-link').addEventListener('click', () => initPlaid());
+    document.getElementById('finish-empty').addEventListener('click', finish);
+    document.getElementById('connect-another').addEventListener('click', () => initPlaid());
+    document.getElementById('finish').addEventListener('click', finish);
   </script>
 </body>
 </html>

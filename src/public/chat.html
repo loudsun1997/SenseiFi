@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="/favicon.png">
+  <title>Sensei-Fi Chat</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #f7f7f4;
+      color: #202023;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      border-bottom: 1px solid #deded8;
+      background: #ffffff;
+    }
+    .bar, main {
+      width: min(1120px, calc(100vw - 32px));
+      margin: 0 auto;
+    }
+    .bar {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 0;
+    }
+    .brand h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 650;
+    }
+    .brand span {
+      color: #6f6f67;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    button {
+      border: 1px solid #c9c9c2;
+      background: #ffffff;
+      color: #202023;
+      min-height: 36px;
+      padding: 0 14px;
+      border-radius: 6px;
+      font: inherit;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button.primary {
+      border-color: #202023;
+      background: #202023;
+      color: #ffffff;
+    }
+    button:disabled {
+      opacity: 0.48;
+      cursor: wait;
+    }
+    main {
+      flex: 1;
+      padding: 18px 0 22px;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .chat-shell {
+      background: #ffffff;
+      border: 1px solid #deded8;
+      border-radius: 8px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 0;
+      flex: 1;
+    }
+    .chat-head {
+      padding: 14px 16px;
+      border-bottom: 1px solid #ededeb;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+    .chat-head h2 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 650;
+    }
+    .chat-head p {
+      margin: 2px 0 0;
+      color: #6f6f67;
+      font-size: 13px;
+    }
+    .chat-messages {
+      min-height: 0;
+      overflow: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: linear-gradient(180deg, #fcfcfb 0%, #f8f8f6 100%);
+    }
+    .message {
+      max-width: min(860px, 88%);
+      border: 1px solid #ededeb;
+      border-radius: 8px;
+      padding: 10px 11px;
+      font-size: 14px;
+      line-height: 1.5;
+      background: #ffffff;
+      overflow-wrap: anywhere;
+    }
+    .message.user {
+      align-self: flex-end;
+      background: #202023;
+      border-color: #202023;
+      color: #ffffff;
+    }
+    .message.assistant { align-self: flex-start; }
+    .message.thinking {
+      align-self: flex-start;
+      color: #6f6f67;
+      background: #f6f6f3;
+    }
+    .message p {
+      margin: 0 0 8px;
+    }
+    .message p:last-child { margin-bottom: 0; }
+    .composer {
+      border-top: 1px solid #ededeb;
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+      background: #ffffff;
+    }
+    textarea {
+      width: 100%;
+      resize: vertical;
+      min-height: 88px;
+      max-height: 220px;
+      border: 1px solid #c9c9c2;
+      border-radius: 8px;
+      padding: 10px;
+      color: #202023;
+      background: #ffffff;
+      font: inherit;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    textarea:focus {
+      outline: 2px solid #536f67;
+      outline-offset: 1px;
+    }
+    .composer-foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .hint {
+      color: #6f6f67;
+      font-size: 12px;
+    }
+    @media (max-width: 860px) {
+      .bar {
+        align-items: flex-start;
+        flex-direction: column;
+        padding: 14px 0;
+      }
+      .actions { justify-content: flex-start; }
+      .chat-head {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .message {
+        max-width: 96%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <div class="brand">
+        <h1>Sensei-Fi</h1>
+        <span id="status">Ready</span>
+      </div>
+      <div class="actions">
+        <button id="back-dashboard" type="button">Dashboard</button>
+        <button id="retry-chat" type="button" disabled>Retry</button>
+        <button id="cancel-chat" type="button" disabled>Cancel</button>
+        <button id="export-chat" type="button">Export</button>
+        <button id="refresh-chat" type="button">Refresh</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="chat-shell">
+      <div class="chat-head">
+        <div>
+          <h2>Chat</h2>
+          <p>Ask anything about spending, risk, cash pressure, or purchase decisions.</p>
+        </div>
+      </div>
+      <div class="chat-messages" id="chat-messages"></div>
+      <form class="composer" id="chat-form">
+        <textarea id="chat-input" placeholder="Ask about your money"></textarea>
+        <div class="composer-foot">
+          <span class="hint">Press Enter to send, Shift+Enter for a new line.</span>
+          <button id="chat-send" class="primary" type="submit">Send</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    const sessionId = window.location.pathname.split('/chat/')[1];
+    const statusEl = document.getElementById('status');
+    const chatMessagesEl = document.getElementById('chat-messages');
+    const chatFormEl = document.getElementById('chat-form');
+    const chatInputEl = document.getElementById('chat-input');
+    const chatSendEl = document.getElementById('chat-send');
+    const retryChatEl = document.getElementById('retry-chat');
+    const cancelChatEl = document.getElementById('cancel-chat');
+    const exportChatEl = document.getElementById('export-chat');
+    let activeStreamController = null;
+    let activeRequestId = null;
+    let lastUserMessage = '';
+
+    function setBusy(isBusy, text) {
+      statusEl.textContent = text || (isBusy ? 'Working' : 'Ready');
+      chatSendEl.disabled = isBusy;
+      cancelChatEl.disabled = !isBusy;
+      retryChatEl.disabled = isBusy || !lastUserMessage;
+    }
+
+    async function loadChatHistory() {
+      try {
+        const res = await fetch('/api/chat-history');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not load chat history');
+        chatMessagesEl.innerHTML = '';
+        const history = data.history || [];
+        if (history.length === 0) {
+          appendMessage('assistant', 'I can see your local financial data. Ask what changed, what looks risky, or whether a purchase fits your current cash pressure.');
+          return;
+        }
+        history.forEach(message => appendMessage(message.role, message.content, false));
+        scrollChatToBottom();
+      } catch (_error) {
+        chatMessagesEl.innerHTML = '';
+        appendMessage('assistant', 'Chat history is unavailable right now, but you can still send a new question.');
+      }
+    }
+
+    async function sendChatMessage(event) {
+      event.preventDefault();
+      const message = chatInputEl.value.trim();
+      if (!message || chatSendEl.disabled) return;
+      lastUserMessage = message;
+
+      appendMessage('user', message);
+      chatInputEl.value = '';
+      setBusy(true, 'Thinking');
+      const thinkingEl = appendMessage('thinking', 'Thinking...');
+      const streamedAssistantEl = appendMessage('assistant', '');
+      let streamedReply = '';
+      activeRequestId = crypto.randomUUID();
+      activeStreamController = new AbortController();
+
+      try {
+        const res = await fetch('/api/chat-stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId, message, request_id: activeRequestId }),
+          signal: activeStreamController.signal,
+        });
+        if (!res.ok || !res.body) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Chat failed');
+        }
+
+        await readNdjsonStream(res.body, eventData => {
+          if (eventData.type === 'progress') {
+            const toolName = eventData.progress?.toolName || null;
+            if (toolName) thinkingEl.innerHTML = formatMessage('Using ' + toolName.replaceAll('_', ' ') + '...');
+            return;
+          }
+          if (eventData.type === 'delta') {
+            streamedReply += eventData.text || '';
+            streamedAssistantEl.innerHTML = formatMessage(streamedReply);
+            scrollChatToBottom();
+            return;
+          }
+          if (eventData.type === 'final') {
+            streamedReply = eventData.reply || streamedReply;
+            streamedAssistantEl.innerHTML = formatMessage(streamedReply || 'I could not produce a response.');
+            return;
+          }
+          if (eventData.type === 'error') {
+            throw new Error(eventData.message || 'Chat failed');
+          }
+        });
+
+        thinkingEl.remove();
+        if (!streamedReply) {
+          streamedAssistantEl.innerHTML = formatMessage('I could not produce a response.');
+        }
+      } catch (error) {
+        streamedAssistantEl.remove();
+        thinkingEl.remove();
+        const isAbort = activeStreamController && activeStreamController.signal.aborted;
+        appendMessage('assistant', isAbort ? 'Request cancelled.' : (error.message || 'Chat failed.'));
+      } finally {
+        activeRequestId = null;
+        activeStreamController = null;
+        setBusy(false, 'Ready');
+        chatInputEl.focus();
+      }
+    }
+
+    async function readNdjsonStream(body, onEvent) {
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let lineBreak;
+        while ((lineBreak = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, lineBreak).trim();
+          buffer = buffer.slice(lineBreak + 1);
+          if (!line) continue;
+          let parsed;
+          try {
+            parsed = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          onEvent(parsed);
+        }
+      }
+      if (buffer.trim()) {
+        try {
+          onEvent(JSON.parse(buffer.trim()));
+        } catch {}
+      }
+    }
+
+    async function cancelActiveChat() {
+      if (!activeRequestId || !activeStreamController) return;
+      const requestId = activeRequestId;
+      activeStreamController.abort();
+      await fetch('/api/chat-cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: requestId }),
+      }).catch(() => {});
+    }
+
+    function retryLastMessage() {
+      if (!lastUserMessage || chatSendEl.disabled) return;
+      chatInputEl.value = lastUserMessage;
+      chatFormEl.requestSubmit();
+    }
+
+    async function exportChat(format = 'md') {
+      const res = await fetch('/api/chat-export?format=' + encodeURIComponent(format));
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = format === 'json' ? 'senseifi-chat-export.json' : 'senseifi-chat-export.md';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(href);
+    }
+
+    function appendMessage(role, text, shouldScroll = true) {
+      const message = document.createElement('div');
+      message.className = 'message ' + (role === 'user' ? 'user' : role === 'thinking' ? 'thinking' : 'assistant');
+      message.innerHTML = formatMessage(text || '');
+      chatMessagesEl.appendChild(message);
+      if (shouldScroll) scrollChatToBottom();
+      return message;
+    }
+
+    function scrollChatToBottom() {
+      chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+    }
+
+    function formatMessage(text) {
+      const escaped = escapeHtml(text);
+      return escaped
+        .split(/\n{2,}/)
+        .map(paragraph => '<p>' + paragraph
+          .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+          .replace(/\n/g, '<br>') + '</p>')
+        .join('');
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[char]));
+    }
+
+    document.getElementById('back-dashboard').addEventListener('click', () => {
+      window.location.href = '/app/' + sessionId;
+    });
+    retryChatEl.addEventListener('click', retryLastMessage);
+    cancelChatEl.addEventListener('click', cancelActiveChat);
+    exportChatEl.addEventListener('click', () => {
+      exportChat('md').catch(() => appendMessage('assistant', 'Could not export chat right now.'));
+    });
+    document.getElementById('refresh-chat').addEventListener('click', loadChatHistory);
+    chatFormEl.addEventListener('submit', sendChatMessage);
+    chatInputEl.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        chatFormEl.requestSubmit();
+      }
+    });
+
+    loadChatHistory();
+    retryChatEl.disabled = true;
+    cancelChatEl.disabled = true;
+    chatInputEl.focus();
+  </script>
+</body>
+</html>

@@ -23,6 +23,21 @@ export async function createLinkToken(products: Products[] = [Products.Transacti
   return resp.data.link_token;
 }
 
+/** Create a link token for Plaid update mode account selection on an existing Item. */
+export async function createAccountSelectionUpdateLinkToken(accessToken: string) {
+  const resp = await plaidClient.linkTokenCreate({
+    user: { client_user_id: "ray-user" },
+    client_name: "Ray Finance",
+    access_token: accessToken,
+    country_codes: getCountryCodes(),
+    language: "en",
+    update: {
+      account_selection_enabled: true,
+    },
+  } as any);
+  return resp.data.link_token;
+}
+
 /** Exchange a public token from Plaid Link for an access token */
 export async function exchangeToken(publicToken: string) {
   const resp = await plaidClient.itemPublicTokenExchange({

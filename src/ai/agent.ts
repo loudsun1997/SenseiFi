@@ -7,6 +7,9 @@ import { logToolCall } from "./audit.js";
 import { redact, unredact } from "./redactor.js";
 import { createProvider } from "./providers/index.js";
 import type { NormalizedMessage, NormalizedToolResult, NormalizedContentBlock } from "./provider.js";
+import { getNetWorth } from "../queries/index.js";
+import { getLatestFinancialAnalysis } from "../analysis/index.js";
+import type { ChatSurface } from "./system-prompt.js";
 
 const provider = createProvider();
 
@@ -32,6 +35,8 @@ export const TOOL_LABELS: Record<string, string> = {
   get_bnpl_pressure: "Checking BNPL pressure",
   get_bnpl_ledger: "Reading BNPL ledger",
   add_bnpl_plan: "Adding BNPL plan",
+  compare_debt_payoff_strategies: "Comparing debt strategies",
+  calculate_credit_card_payoff: "Simulating card payoff",
   evaluate_purchase: "Running purchase consult",
   record_purchase_decision: "Recording purchase decision",
   log_asset_usage: "Logging asset usage",
@@ -57,11 +62,16 @@ export class AbortedError extends Error {
   }
 }
 
+export interface HandleMessageOptions {
+  surface?: ChatSurface;
+}
+
 export async function handleMessage(
   db: Database.Database,
   userMessage: string,
   onProgress?: ProgressCallback,
   signal?: AbortSignal,
+  options: HandleMessageOptions = {},
 ): Promise<string> {
   // Save incoming message
   saveMessage(db, "user", userMessage);
@@ -78,7 +88,7 @@ export async function handleMessage(
   }
 
   // Build system prompt and redact PII before sending to API
-  const systemPrompt = redact(buildSystemPrompt(db));
+  const systemPrompt = redact(buildSystemPrompt(db, options.surface || "cli"));
 
   // Build messages array from history, redacting PII
   const messages: NormalizedMessage[] = history.map(h => ({
@@ -170,12 +180,16 @@ export async function handleMessage(
 
     // Extract text response, restore PII for display
     const textBlocks = response.content.filter((b): b is Extract<NormalizedContentBlock, { type: "text" }> => b.type === "text");
-    const responseText = unredact(textBlocks.map(b => b.text).join("\n"));
+    const responseText = unredact(textBlocks.map(b => b.text).join("\n")).trim();
+    const shouldForceGrounded = shouldForceGroundedFallback(userMessage, responseText, toolCount);
+    const finalText = (!responseText || shouldForceGrounded)
+      ? buildDeterministicFallback(db, userMessage)
+      : responseText;
 
     // Save assistant response
-    saveMessage(db, "assistant", responseText);
+    saveMessage(db, "assistant", finalText);
 
-    return responseText || "I looked into that but couldn't formulate a response. Could you try rephrasing?";
+    return finalText;
   } catch (error: any) {
     if (error instanceof AbortedError || error?.name === "AbortError" || signal?.aborted) {
       throw new AbortedError();
@@ -196,6 +210,68 @@ export async function handleMessage(
       ? `API error (${error.status}): ${error.message || ""}`
       : error.message || "internal error";
     console.error("AI error:", safeMessage);
-    return "Sorry, I had trouble processing that. Could you try again?";
+    return buildDeterministicFallback(db, userMessage);
   }
+}
+
+function buildDeterministicFallback(db: Database.Database, userMessage: string): string {
+  const txCountRow = db.prepare(`SELECT COUNT(*) as count FROM transactions`).get() as { count: number };
+  const txCount = Number(txCountRow?.count || 0);
+  if (txCount === 0) {
+    return "I don't see synced transactions yet. Run a fresh sync, then I can give a grounded evaluation.";
+  }
+
+  const nw = getNetWorth(db);
+  const analysis = getLatestFinancialAnalysis(db);
+  const isFactVerification = /one info|one fact|verify/i.test(userMessage);
+  const firstFact = `Net worth is ${formatMoney(nw.net_worth)} with cash ${formatMoney(nw.cash)} and debt ${formatMoney(nw.credit_debt + nw.mortgage)}.`;
+
+  if (!analysis) {
+    return `${firstFact} I can pull deeper recommendations after you run Analyze once in the dashboard.`;
+  }
+
+  const topDebt = analysis.debtAvalanche?.payoffOrder?.[0];
+  const lines = [
+    firstFact,
+    `True affordability is ${analysis.trueAffordability.affordabilityBand}; safe-to-spend today is ${formatMoney(analysis.trueAffordability.safeToSpendToday)}.`,
+    `Emergency runway is ${analysis.emergencyFundRunway.runwayMonths.toFixed(1)} months.`,
+  ];
+
+  if (topDebt) {
+    lines.push(`Highest-priority debt is ${topDebt.accountName} at ${topDebt.apr}% APR.`);
+  }
+
+  if (isFactVerification) {
+    return lines[0];
+  }
+
+  if (/top 3|focus goals|90 days|evaluation|overview|my situation|financial status|based on my/i.test(userMessage.toLowerCase())) {
+    const goals: string[] = [];
+    if (topDebt) goals.push(`1. Attack ${topDebt.accountName} first: direct extra payments to the ${topDebt.apr}% APR balance while paying minimums on everything else.`);
+    goals.push(`2. Keep discretionary spend under ${formatMoney(Math.max(0, analysis.trueAffordability.safeToSpendToday * 0.12))} total over the next 90 days to preserve your cash-pressure buffer.`);
+    goals.push(`3. Run weekly check-ins: Sync + Analyze once a week and review any obligations due in the next 14 days.`);
+    lines.push("Top 3 focus goals for the next 90 days:");
+    lines.push(...goals);
+    return lines.join("\n");
+  }
+
+  lines.push("If you want, I can break this into top 3 focus goals for the next 90 days.");
+  return lines.join("\n");
+}
+
+function shouldForceGroundedFallback(userMessage: string, responseText: string, toolCount: number): boolean {
+  if (toolCount > 0) return false;
+  const prompt = userMessage.toLowerCase();
+  const asksForGroundedFact = /one info|one fact|verify|context|financial status|overview|evaluation|my situation|based on my/i.test(prompt);
+  if (!asksForGroundedFact) return false;
+
+  const answer = responseText.toLowerCase();
+  const looksGeneric =
+    /what kind of information|please let me know|for example|i can certainly|i can help you|which area|please provide more details/.test(answer);
+  const hasConcreteNumbers = /\$\d|%\b|\b\d{1,3}(,\d{3})*(\.\d+)?\b/.test(responseText);
+  return looksGeneric || !hasConcreteNumbers;
+}
+
+function formatMoney(value: number): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value || 0);
 }

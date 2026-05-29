@@ -2,13 +2,37 @@ node_modules/
 dist/
 data/
 !site/src/data/
+
+# Local runtime data and generated financial context.
+# These can contain real balances, transactions, Plaid-derived data, or private notes.
+.tmp/
+context.md
+context-*.md
+
+# Local secrets and environment overrides.
 .env
 .env.local
 .env.*.local
+
+# Local databases and SQLite sidecars.
 *.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Local logs, archives, and exports.
+*.log
+*.bak
+*.backup
+*backup*.json
+*export*.json
+
 *.tgz
 .DS_Store
 .vscode/
 .idea/
 coverage/
 .gstack/
+*.swp

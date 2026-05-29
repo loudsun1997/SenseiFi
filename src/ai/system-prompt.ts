@@ -4,7 +4,9 @@ import { getMemories } from "./memory.js";
 import { readContext, isContextEmpty } from "./context.js";
 import { computeInsights } from "./insights.js";
 
-export function buildSystemPrompt(db: Database.Database): string {
+export type ChatSurface = "cli" | "web";
+
+export function buildSystemPrompt(db: Database.Database, surface: ChatSurface = "cli"): string {
   const memories = getMemories(db);
   const now = new Date();
   const dateStr = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
@@ -46,7 +48,14 @@ Today is ${dateStr}.
 - For date-based queries, figure out the right date range from context (e.g., "this month" = first of current month to today).
 - If you notice transactions suggesting unlinked accounts (e.g., mortgage payments, car loans, investment transfers) that aren't in the linked accounts, mention it once and suggest \`ray link\`. If the user says they don't have that account, save it to context.
 
-## Ray CLI Commands
+${surface === "web" ? `## Sensei-Fi Web App
+${name} is chatting with you inside the local Sensei-Fi web dashboard. Prefer pointing them to visible dashboard actions when relevant:
+- Connect — Link a new bank/brokerage account via Plaid
+- Sync — Pull latest transactions and then run financial analysis
+- Analyze — Recompute the analysis cockpit from saved local data
+- Refresh — Reload account balances and dashboard state
+
+The CLI still exists for advanced workflows, but do not tell them to exit chat or run terminal commands unless a feature is not available in the web app yet.` : `## Ray CLI Commands
 ${name} is chatting with you inside the Ray CLI. When referencing commands, remind them to exit chat first (Ctrl+C or "quit"), then run the command in their terminal.
 - \`ray link\` — Link a new bank/brokerage account via Plaid
 - \`ray add\` — Add a manual account (home, car, crypto, etc.)
@@ -74,7 +83,7 @@ ${name} is chatting with you inside the Ray CLI. When referencing commands, remi
 - \`ray setup\` — Reconfigure Ray (API keys, provider, preferences)
 - \`ray doctor\` — Check system health
 - \`ray billing\` — Manage Ray Pro subscription
-- \`ray update\` — Update Ray to the latest version
+- \`ray update\` — Update Ray to the latest version`}
 
 ## Privacy
 - Never reveal account numbers, routing numbers, or Plaid access tokens.

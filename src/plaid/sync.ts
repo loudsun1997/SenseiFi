@@ -133,7 +133,7 @@ export async function syncBalances(db: Database, accessToken: string) {
     ON CONFLICT(account_id) DO UPDATE SET
       name=excluded.name, official_name=excluded.official_name,
       current_balance=excluded.current_balance, available_balance=excluded.available_balance,
-      balance_limit=excluded.balance_limit, updated_at=datetime('now')
+      balance_limit=excluded.balance_limit, hidden=0, updated_at=datetime('now')
   `);
 
   const itemId = resp.data.item.item_id;
@@ -152,6 +152,20 @@ export async function syncBalances(db: Database, accessToken: string) {
         balance_limit: a.balances.limit ?? null,
         currency: a.balances.iso_currency_code || "USD",
       });
+    }
+
+    const activeIds = resp.data.accounts.map(a => a.account_id);
+    const staleAccounts = activeIds.length > 0
+      ? db.prepare(`SELECT account_id FROM accounts WHERE item_id = ? AND account_id NOT IN (${activeIds.map(() => "?").join(",")})`).all(itemId, ...activeIds) as { account_id: string }[]
+      : db.prepare(`SELECT account_id FROM accounts WHERE item_id = ?`).all(itemId) as { account_id: string }[];
+
+    for (const account of staleAccounts) {
+      db.prepare(`DELETE FROM transactions WHERE account_id = ?`).run(account.account_id);
+      db.prepare(`DELETE FROM holdings WHERE account_id = ?`).run(account.account_id);
+      db.prepare(`DELETE FROM investment_transactions WHERE account_id = ?`).run(account.account_id);
+      db.prepare(`DELETE FROM liabilities WHERE account_id = ?`).run(account.account_id);
+      db.prepare(`DELETE FROM recurring WHERE account_id = ?`).run(account.account_id);
+      db.prepare(`DELETE FROM accounts WHERE account_id = ?`).run(account.account_id);
     }
   });
   insertMany();

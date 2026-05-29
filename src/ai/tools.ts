@@ -12,8 +12,9 @@ import { getLatestScore, getMonthlySavings } from "../scoring/index.js";
 import { generateAlerts } from "../alerts/index.js";
 import { saveMemory, getMemories } from "./memory.js";
 import { readContext, writeContext, replaceContextSection } from "./context.js";
-import { simulatePayoff } from "../db/helpers.js";
 import { createBnplPlan, getBnplLedger, getBnplPressure } from "../sensei/bnpl.js";
+import { calculateCreditCardPayoff } from "../sensei/credit-card-payoff.js";
+import { compareDebtPayoffStrategies } from "../sensei/debt-strategies.js";
 import { evaluatePurchase, recordPurchaseDecision, savePurchaseConsultation } from "../sensei/purchase-consultant.js";
 import { getFrictionCommitments, resolveFrictionCommitment } from "../sensei/strategic-friction.js";
 import { getAssetVpu, getRecentAssetVpu, logAssetUsage } from "../sensei/vpu.js";
@@ -242,7 +243,7 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: "calculate_debt_payoff",
-    description: "Simulate debt payoff with different strategies (minimum, avalanche, snowball) and optional extra payment",
+    description: "Simulate portfolio debt payoff with minimum, avalanche, or snowball strategy and optional extra payment",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -250,6 +251,51 @@ export const toolDefinitions: ToolDefinition[] = [
         extra_monthly: { type: "number", description: "Extra monthly payment beyond minimums (default 0)" },
       },
       required: [],
+    },
+  },
+  {
+    name: "compare_debt_payoff_strategies",
+    description: "Compare avalanche, snowball, and optional custom debt payoff order using a month-by-month portfolio simulation.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        extra_monthly: { type: "number", description: "Extra monthly payment on top of all minimums." },
+        include_minimum: { type: "boolean", description: "Include a minimum-payment-only baseline." },
+        custom_order: {
+          type: "array",
+          items: { type: "string" },
+          description: "Custom debt priority list by debt name or id as shown in get_debts.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "calculate_credit_card_payoff",
+    description: "Simulate month-by-month credit-card payoff with issuer-style minimum payment rules, optional promo APR, and target payoff date support.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        balance: { type: "number", description: "Current balance" },
+        apr: { type: "number", description: "APR as decimal, e.g. 0.2499 for 24.99%" },
+        monthly_payment: { type: "number", description: "Fixed monthly payment amount. If omitted, minimum payment logic is used." },
+        target_months: { type: "number", description: "Desired payoff timeline in months. Calculates required monthly payment when monthly_payment is omitted." },
+        minimum_payment_percent: { type: "number", description: "Minimum payment percent of principal (default 0.01)." },
+        minimum_payment_floor: { type: "number", description: "Minimum payment floor amount (default 25)." },
+        new_monthly_charges: { type: "number", description: "Expected new charges per month (default 0)." },
+        promotional_apr: { type: "number", description: "Promo APR as decimal during promotional months, e.g. 0 for 0%." },
+        promotional_months: { type: "number", description: "How many months the promotional APR applies." },
+        max_months: { type: "number", description: "Max simulation horizon in months (default 600)." },
+        fees: {
+          type: "object",
+          properties: {
+            monthly_fee: { type: "number", description: "Monthly maintenance fee amount." },
+            one_time_fee: { type: "number", description: "One-time fee charged in month 1, e.g. transfer fee." },
+          },
+          required: [],
+        },
+      },
+      required: ["balance", "apr"],
     },
   },
   {
@@ -755,44 +801,129 @@ export async function executeTool(db: Database.Database, toolName: string, toolI
     case "calculate_debt_payoff": {
       const d = getDebts(db);
       if (d.debts.length === 0) return "No debts found.";
+      const strategy = String(toolInput.strategy || "avalanche");
+      const extraMonthly = Number(toolInput.extra_monthly || 0);
+      const normalizedDebts = d.debts.map((debt, idx) => ({
+        id: `debt-${idx + 1}`,
+        name: debt.name,
+        balance: debt.balance,
+        aprPct: debt.rate || 0,
+        minPayment: debt.minPayment || 0,
+      }));
+      const comparison = compareDebtPayoffStrategies({
+        debts: normalizedDebts,
+        extraMonthly,
+        includeMinimum: strategy === "minimum",
+      });
+      const selected = comparison.strategies.find(s => s.strategy === strategy) || comparison.strategies[0];
 
-      const strategy = toolInput.strategy || "avalanche";
-      const extraMonthly = toolInput.extra_monthly || 0;
-
-      // Sort debts by strategy
-      const sorted = [...d.debts].filter(debt => debt.balance > 0);
-      if (strategy === "avalanche") sorted.sort((a, b) => b.rate - a.rate);
-      else if (strategy === "snowball") sorted.sort((a, b) => a.balance - b.balance);
-
-      let result = `Debt payoff simulation (${strategy} strategy, ${formatMoney(extraMonthly)} extra/mo):\n`;
+      let result = `Debt payoff simulation (${selected.strategy} strategy, ${formatMoney(extraMonthly)} extra/mo):\n`;
       result += `Total debt: ${formatMoney(d.totalDebt)}\n`;
+      result += selected.monthsToDebtFree == null
+        ? `Debt-free horizon: not reached\n`
+        : `Debt-free horizon: ${selected.monthsToDebtFree} months (${selected.debtFreeDate})\n`;
+      result += `Total interest: ${formatMoney(selected.totalInterestPaid)}\n`;
+      result += `Payoff order: ${selected.payoffOrder.join(" -> ")}`;
+      if (selected.warnings.length > 0) {
+        result += `\nWarnings: ${selected.warnings.join(" | ")}`;
+      }
+      return result;
+    }
 
-      let totalInterest = 0;
-      let maxMonths = 0;
+    case "compare_debt_payoff_strategies": {
+      const d = getDebts(db);
+      if (d.debts.length === 0) return "No debts found.";
+      const extraMonthly = Number(toolInput.extra_monthly || 0);
+      const rawCustom = Array.isArray(toolInput.custom_order) ? toolInput.custom_order.map(String) : [];
+      const normalizedDebts = d.debts.map((debt, idx) => ({
+        id: `debt-${idx + 1}`,
+        name: debt.name,
+        balance: debt.balance,
+        aprPct: debt.rate || 0,
+        minPayment: debt.minPayment || 0,
+      }));
+      const customOrder = rawCustom
+        .map((label: string) => {
+          const byId = normalizedDebts.find(d => d.id.toLowerCase() === label.toLowerCase());
+          if (byId) return byId.id;
+          const byName = normalizedDebts.find(d => d.name.toLowerCase() === label.toLowerCase());
+          return byName?.id || null;
+        })
+        .filter(Boolean) as string[];
 
-      for (const debt of sorted) {
-        if (debt.rate === 0 && debt.minPayment === 0) {
-          result += `\n${debt.name}: ${formatMoney(debt.balance)} — no rate/payment info available`;
-          continue;
+      const comparison = compareDebtPayoffStrategies({
+        debts: normalizedDebts,
+        extraMonthly,
+        includeMinimum: Boolean(toolInput.include_minimum),
+        customOrder,
+      });
+
+      let result = `Debt strategy comparison (${formatMoney(extraMonthly)} extra/mo):\n`;
+      for (const strategy of comparison.strategies) {
+        const horizon = strategy.monthsToDebtFree == null
+          ? "not paid off"
+          : `${strategy.monthsToDebtFree} mo (${strategy.debtFreeDate})`;
+        result += `\n${strategy.strategy.toUpperCase()}: ${horizon}, interest ${formatMoney(strategy.totalInterestPaid)}`;
+      }
+
+      const sortable = comparison.strategies.filter(s => s.monthsToDebtFree != null);
+      if (sortable.length > 0) {
+        const best = [...sortable].sort((a, b) => a.totalInterestPaid - b.totalInterestPaid)[0];
+        result += `\n\nLowest interest strategy: ${best.strategy.toUpperCase()} (${formatMoney(best.totalInterestPaid)})`;
+      }
+      if (customOrder.length > 0) {
+        const resolved = customOrder
+          .map(id => normalizedDebts.find(d => d.id === id)?.name || id)
+          .join(" -> ");
+        result += `\nCustom priority used: ${resolved}`;
+      }
+      return result;
+    }
+
+    case "calculate_credit_card_payoff": {
+      const payoff = calculateCreditCardPayoff({
+        balance: toolInput.balance,
+        apr: toolInput.apr,
+        monthlyPayment: toolInput.monthly_payment,
+        targetMonths: toolInput.target_months,
+        minimumPaymentPercent: toolInput.minimum_payment_percent,
+        minimumPaymentFloor: toolInput.minimum_payment_floor,
+        newMonthlyCharges: toolInput.new_monthly_charges,
+        promotionalApr: toolInput.promotional_apr,
+        promotionalMonths: toolInput.promotional_months,
+        maxMonths: toolInput.max_months,
+        fees: {
+          monthlyFee: toolInput.fees?.monthly_fee,
+          oneTimeFee: toolInput.fees?.one_time_fee,
+        },
+      });
+
+      let result = `Credit-card payoff simulation for ${formatMoney(toolInput.balance)} at ${(Number(toolInput.apr) * 100).toFixed(2)}% APR`;
+      if (payoff.monthsToPayoff == null) {
+        result += `\nPayoff horizon: not paid off in simulation window`;
+      } else {
+        result += `\nPayoff horizon: ${payoff.monthsToPayoff} months`;
+      }
+      result += `\nTotal paid: ${formatMoney(payoff.totalPaid)} | Interest: ${formatMoney(payoff.totalInterestPaid)}`;
+      if (payoff.requiredMonthlyPayment != null) {
+        result += `\nRequired monthly payment for target: ${formatMoney(payoff.requiredMonthlyPayment)}`;
+      }
+      result += `\nFinal payment: ${formatMoney(payoff.finalPayment)}`;
+      if (payoff.warnings.length > 0) {
+        result += `\nWarnings:`;
+        for (const warning of payoff.warnings) {
+          result += `\n- ${warning}`;
         }
-        const payment = Math.max(debt.minPayment, 50) + (sorted.indexOf(debt) === 0 ? extraMonthly : 0);
-        const sim = simulatePayoff(debt.balance, debt.rate, payment);
-        totalInterest += sim.totalInterest;
-        maxMonths = Math.max(maxMonths, sim.months);
-
-        const payoffDate = new Date();
-        payoffDate.setMonth(payoffDate.getMonth() + sim.months);
-        result += `\n${debt.name}: ${formatMoney(debt.balance)} @ ${debt.rate}%`;
-        result += ` → ${sim.months} months (${payoffDate.toISOString().slice(0, 7)})`;
-        result += ` | ${formatMoney(sim.totalInterest)} interest | ${formatMoney(payment)}/mo`;
       }
 
-      result += `\n\nTotal interest: ${formatMoney(totalInterest)}`;
-      if (maxMonths > 0) {
-        const finalDate = new Date();
-        finalDate.setMonth(finalDate.getMonth() + maxMonths);
-        result += ` | Debt-free by: ${finalDate.toISOString().slice(0, 7)}`;
+      const preview = payoff.schedule.slice(0, 6);
+      if (preview.length > 0) {
+        result += `\n\nFirst months:`;
+        for (const row of preview) {
+          result += `\nM${row.month}: start ${formatMoney(row.startingBalance)}, interest ${formatMoney(row.interestCharged)}, pay ${formatMoney(row.payment)}, end ${formatMoney(row.endingBalance)}`;
+        }
       }
+
       return result;
     }
 

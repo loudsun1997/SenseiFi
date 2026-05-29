@@ -81,6 +81,17 @@ export function migrate(db: Database.Database): void {
       UNIQUE(account_id, type)
     );
 
+    CREATE TABLE IF NOT EXISTS liability_apr_terms (
+      account_id TEXT PRIMARY KEY REFERENCES accounts(account_id) ON DELETE CASCADE,
+      promo_apr REAL NOT NULL DEFAULT 0,
+      promo_start_date TEXT,
+      promo_end_date TEXT,
+      post_promo_apr REAL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      source TEXT NOT NULL DEFAULT 'user',
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS net_worth_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL UNIQUE,
@@ -213,6 +224,31 @@ export function migrate(db: Database.Database): void {
       input_params TEXT,
       result_summary TEXT,
       tokens_used INTEGER,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS financial_analysis_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      model_version TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'complete',
+      started_at TEXT DEFAULT (datetime('now')),
+      completed_at TEXT,
+      input_window_start TEXT,
+      input_window_end TEXT,
+      result_json TEXT,
+      error TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS financial_insights (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id INTEGER REFERENCES financial_analysis_runs(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      severity TEXT NOT NULL,
+      title TEXT NOT NULL,
+      detail TEXT NOT NULL,
+      metric_label TEXT,
+      metric_value REAL,
+      action TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -422,5 +458,11 @@ export function migrate(db: Database.Database): void {
       ON strategic_friction_events(consultation_id);
     CREATE INDEX IF NOT EXISTS idx_strategic_friction_commitments_due
       ON strategic_friction_commitments(status, due_at);
+    CREATE INDEX IF NOT EXISTS idx_financial_analysis_runs_completed
+      ON financial_analysis_runs(completed_at);
+    CREATE INDEX IF NOT EXISTS idx_financial_insights_run
+      ON financial_insights(run_id, severity);
+    CREATE INDEX IF NOT EXISTS idx_liability_apr_terms_enabled
+      ON liability_apr_terms(enabled, promo_end_date);
   `);
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type Database from "libsql";
-import { handleMessage, AbortedError } from "../../../ai/agent.js";
+import { getAgentRuntime, AbortedError } from "../../../ai/runtime.js";
 import type { ProgressCallback } from "../../../ai/agent.js";
 import type { ThinkingState } from "../messages/ThinkingLine.js";
 
@@ -30,11 +30,12 @@ interface UseAgentOpts {
 }
 
 /**
- * Bridges handleMessage with Ink state. submit() kicks off a run and owns the
+ * Bridges agent runtime chat with Ink state. submit() kicks off a run and owns the
  * AbortController; cancel() aborts whatever's in flight. state.thinking is null
  * when idle, a ThinkingState otherwise.
  */
 export function useAgent({ db, onEvent }: UseAgentOpts) {
+  const runtime = getAgentRuntime();
   const [thinking, setThinking] = useState<ThinkingState | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const onEventRef = useRef(onEvent);
@@ -63,7 +64,13 @@ export function useAgent({ db, onEvent }: UseAgentOpts) {
 
     (async () => {
       try {
-        const response = await handleMessage(db, text, onProgress, controller.signal);
+        const response = await runtime.chat({
+          db,
+          message: text,
+          onProgress,
+          signal: controller.signal,
+          surface: "cli",
+        });
         if (controller.signal.aborted) {
           onEventRef.current({ type: "interrupted" });
         } else {
@@ -83,7 +90,7 @@ export function useAgent({ db, onEvent }: UseAgentOpts) {
         }
       }
     })();
-  }, [db]);
+  }, [db, runtime]);
 
   useEffect(() => {
     return () => {

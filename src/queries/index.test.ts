@@ -320,7 +320,7 @@ describe("forecastBalance", () => {
 
     // Seed 3 months of transactions for averaging
     for (let m = 1; m <= 3; m++) {
-      const date = daysAgo(m * 30);
+      const date = daysAgo(m * 30 - 15);
       seedTransaction(db, { id: `inc-${m}`, accountId: "a", amount: -5000, date, name: "Paycheck" });
       seedTransaction(db, { id: `exp-${m}`, accountId: "a", amount: 3000, date, name: "Rent" });
     }
@@ -448,7 +448,7 @@ describe("forecastBalance excludes LOAN_PAYMENTS from inflow", () => {
     seedAccount(db, { id: "a", type: "depository", balance: 10000 });
 
     for (let m = 1; m <= 3; m++) {
-      const date = daysAgo(m * 30);
+      const date = daysAgo(m * 30 - 15);
       seedTransaction(db, { id: `inc-${m}`, accountId: "a", amount: -5000, date, name: "Paycheck", category: "INCOME" });
       seedTransaction(db, { id: `lp-${m}`, accountId: "a", amount: -1000, date, name: "CC Payment", category: "LOAN_PAYMENTS" });
       seedTransaction(db, { id: `xfr-${m}`, accountId: "a", amount: -500, date, name: "Transfer", category: "TRANSFER_IN" });

@@ -15,6 +15,7 @@ import { decryptPlaidToken } from "./db/encryption.js";
 import { config } from "./config.js";
 import { institutionName } from "./cli/format.js";
 import { refreshPropertyValues, hasListingUrls } from "./property.js";
+import { runFinancialAnalysis } from "./analysis/index.js";
 
 export interface SyncResult {
   transactionsAdded: number;
@@ -190,6 +191,13 @@ export async function runDailySync(
     for (const a of newAchievements) {
       logger.log(`  Achievement unlocked: ${a.name} — ${a.description}`);
     }
+  }
+
+  try {
+    const analysis = runFinancialAnalysis(db);
+    logger.log(`  Analysis: ${analysis.trueAffordability.affordabilityBand} affordability, ${analysis.emergencyFundRunway.runwayMonths} months runway`);
+  } catch (e: any) {
+    logger.error(`  Analysis error: ${e.message || "failed"}`);
   }
 
   // Auto-recategorize using rules from recategorization_rules table

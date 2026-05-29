@@ -55,14 +55,19 @@ export async function runLink(): Promise<void> {
   const { url, waitForComplete, stop } = startLinkServer();
   console.log(`\n${heading("Link Account")}\n`);
   console.log(`Opening Plaid Link in your browser...\n`);
+  console.log(dim(`Connect every bank or account you want, then click Finish in the browser.`));
   console.log(dim(`  ${url}\n`));
 
   await open(url);
 
-  const spinner = ora("Waiting for bank connection...").start();
-  await waitForComplete();
+  const spinner = ora("Waiting for bank connections...").start();
+  const linkedCount = await waitForComplete();
   stop();
-  spinner.succeed("Bank account linked successfully!");
+  if (linkedCount > 0) {
+    spinner.succeed(`${linkedCount} bank connection${linkedCount === 1 ? "" : "s"} linked successfully!`);
+  } else {
+    spinner.warn("No bank connections were linked.");
+  }
 
   // Check if a mortgage was linked and we don't already have a property account
   const db = getDb();
@@ -98,6 +103,30 @@ export async function runLink(): Promise<void> {
       rl.close();
     }
   }
+}
+
+export async function runGui(): Promise<void> {
+  const open = (await import("open")).default;
+  const { startFinanceGuiServer } = await import("../server.js");
+  const { url, stop } = startFinanceGuiServer();
+
+  console.log(`\n${heading("Sensei-Fi GUI")}\n`);
+  console.log(`Opening account dashboard in your browser...\n`);
+  console.log(dim(`  ${url}\n`));
+  console.log(dim("Press Ctrl+C here when you're done.\n"));
+
+  await open(url);
+
+  await new Promise<void>((resolve) => {
+    const shutdown = () => {
+      stop();
+      process.off("SIGINT", shutdown);
+      process.off("SIGTERM", shutdown);
+      resolve();
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+  });
 }
 
 export async function showAccounts(): Promise<void> {
